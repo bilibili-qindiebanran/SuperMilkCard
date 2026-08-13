@@ -15,6 +15,9 @@ $RECYCLE.BIN/
 # 编辑器 / IDE
 .vscode/
 .idea/
+
+# ZCode 内部文件
+.zcode/
 *.swp
 *.swo
 *~
@@ -48,7 +51,7 @@ ESP32/**/*.o
 Windows/.vs/
 Windows/**/[Bb]in/
 Windows/**/[Oo]bj/
-Windows/**/[Bb]uild/
+# 注意：Windows/build/ 是 electron-builder 的图标/签名资源目录，必须提交，不能忽略
 Windows/**/[Oo]ut/
 Windows/**/*.user
 Windows/**/*.suo
@@ -67,3 +70,7 @@ Windows/**/.env
 
 # Node（如适用）
 Windows/**/node_modules/
+
+# Electron 打包产物
+Windows/dist/
+Windows/release/
