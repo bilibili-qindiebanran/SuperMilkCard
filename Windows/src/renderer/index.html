@@ -2,12 +2,14 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <title>Electron</title>
+    <title>SuperMilkCard</title>
     <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: live2d:; connect-src 'self' live2d:;"
     />
+    <!-- Live2D Cubism 4 Core（需在 pixi-live2d-display 之前加载） -->
+    <script src="./live2d/live2dcubismcore.min.js"></script>
   </head>
 
   <body>

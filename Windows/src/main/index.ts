@@ -1,13 +1,66 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, protocol } from 'electron'
+import { join, extname } from 'path'
+import { readFile } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { registerIpc } from './ipc'
+import { modelsDir, builtinDir } from './services/live2dModels'
+
+// 注册 live2d:// 自定义协议，用于打包后从本地读取 Live2D 模型资源（规避 file:// 的 XHR 限制）
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'live2d',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+  }
+])
+
+function mimeFor(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case '.json':
+      return 'application/json'
+    case '.png':
+      return 'image/png'
+    case '.js':
+      return 'text/javascript'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
+function registerLive2dProtocol(): void {
+  // 候选目录：用户导入的模型目录优先，其次是内置目录
+  const bases = [modelsDir(), builtinDir()]
+  protocol.handle('live2d', async (request) => {
+    const url = new URL(request.url)
+    const rel = decodeURIComponent(url.host + url.pathname)
+    for (const base of bases) {
+      const filePath = join(base, rel)
+      try {
+        const data = await readFile(filePath)
+        return new Response(data, {
+          headers: {
+            'Content-Type': mimeFor(filePath),
+            'Access-Control-Allow-Origin': '*'
+          }
+        })
+      } catch {
+        // 尝试下一个目录
+      }
+    }
+    return new Response('Not Found', {
+      status: 404,
+      headers: { 'Access-Control-Allow-Origin': '*' }
+    })
+  })
+}
 
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1200,
+    height: 800,
+    minWidth: 960,
+    minHeight: 640,
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
@@ -40,7 +93,7 @@ function createWindow(): void {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.supermilkcard.app')
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
@@ -49,8 +102,8 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  registerLive2dProtocol()
+  registerIpc()
 
   createWindow()
 

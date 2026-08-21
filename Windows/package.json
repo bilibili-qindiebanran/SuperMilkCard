@@ -1,9 +1,9 @@
 {
-  "name": "windows",
+  "name": "super-milk-card",
   "version": "1.0.0",
-  "description": "An Electron application with Vue and TypeScript",
+  "description": "AI 聊天机器人桌面应用：Live2D 虚拟形象 + 流式对话 + 语音交互",
   "main": "./out/main/index.js",
-  "author": "example.com",
+  "author": "SuperMilkCard",
   "homepage": "https://electron-vite.org",
   "scripts": {
     "format": "prettier --write .",
@@ -23,8 +23,11 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@pixi/unsafe-eval": "^6.5.10",
     "naive-ui": "^2.44.1",
     "pinia": "^4.0.3",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^6.5.10",
     "vue-router": "^5.2.0"
   },
   "devDependencies": {
