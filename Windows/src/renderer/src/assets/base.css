@@ -1,34 +1,87 @@
 :root {
-  --ev-c-white: #ffffff;
-  --ev-c-white-soft: #f8f8f8;
-  --ev-c-white-mute: #f2f2f2;
+  /* 玻璃面板基础色（浅色） */
+  --bg: #eef3fb;
+  --bg-gradient: linear-gradient(160deg, #ffd6ea 0%, #e6d9ff 42%, #cfe8ff 100%);
 
-  --ev-c-black: #1b1b1f;
-  --ev-c-black-soft: #222222;
-  --ev-c-black-mute: #282828;
+  /* 液态玻璃面板：半透明玻璃白 */
+  --bg-panel: rgba(255, 255, 255, 0.52);
+  --bg-elevated: rgba(255, 255, 255, 0.66);
+  --bg-mute: rgba(255, 255, 255, 0.4);
 
-  --ev-c-gray-1: #515c67;
-  --ev-c-gray-2: #414853;
-  --ev-c-gray-3: #32363f;
+  /* 玻璃高光描边（边缘反光） */
+  --border: rgba(255, 255, 255, 0.62);
 
-  --ev-c-text-1: rgba(255, 255, 245, 0.86);
-  --ev-c-text-2: rgba(235, 235, 245, 0.6);
-  --ev-c-text-3: rgba(235, 235, 245, 0.38);
+  --text: #2d2a3e;
+  --text-2: #6f6a87;
+  --text-3: #a8a2bd;
 
-  --ev-button-alt-border: transparent;
-  --ev-button-alt-text: var(--ev-c-text-1);
-  --ev-button-alt-bg: var(--ev-c-gray-3);
-  --ev-button-alt-hover-border: transparent;
-  --ev-button-alt-hover-text: var(--ev-c-text-1);
-  --ev-button-alt-hover-bg: var(--ev-c-gray-2);
+  --primary: #ff7eb9;
+  --primary-strong: #f062a5;
+  --primary-soft: rgba(255, 126, 185, 0.16);
+  --accent: #7dd3fc;
+  --accent-soft: rgba(125, 211, 252, 0.2);
+  --danger: #ff6b81;
+
+  --radius: 22px;
+  --shadow: 0 8px 32px rgba(180, 140, 220, 0.22);
+
+  /* 液态玻璃通用组合（供 main.css 复用） */
+  --glass-bg: rgba(255, 255, 255, 0.45);
+  --glass-bg-strong: rgba(255, 255, 255, 0.62);
+  --glass-border: rgba(255, 255, 255, 0.55);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  --glass-blur: blur(20px) saturate(165%);
+
+  /* 滚动条（浅色） */
+  --scrollbar-thumb: rgba(160, 140, 200, 0.35);
+  --scrollbar-thumb-hover: rgba(160, 140, 200, 0.55);
+  --scrollbar-track: transparent;
+
+  /* 占位符 / 图标（浅色） */
+  --placeholder: rgba(160, 154, 184, 0.6);
+  --icon-soft: rgba(120, 112, 152, 0.55);
 }
 
-:root {
-  --color-background: var(--ev-c-black);
-  --color-background-soft: var(--ev-c-black-soft);
-  --color-background-mute: var(--ev-c-black-mute);
+:root.dark {
+  --bg: #17142c;
+  --bg-gradient: linear-gradient(160deg, #2a1d4a 0%, #2a1d5e 45%, #142b4d 100%);
 
-  --color-text: var(--ev-c-text-1);
+  /* 液态玻璃面板：深色半透明 */
+  --bg-panel: rgba(30, 26, 58, 0.55);
+  --bg-elevated: rgba(255, 255, 255, 0.09);
+  --bg-mute: rgba(255, 255, 255, 0.06);
+
+  /* 玻璃高光描边 */
+  --border: rgba(255, 255, 255, 0.14);
+
+  --text: #f0edfa;
+  --text-2: #c4bedd;
+  --text-3: #918baf;
+
+  --primary: #ff8ec3;
+  --primary-strong: #ffa5d0;
+  --primary-soft: rgba(255, 142, 195, 0.16);
+  --accent: #8ad8ff;
+  --accent-soft: rgba(138, 216, 255, 0.16);
+  --danger: #ff7b8a;
+
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+
+  /* 液态玻璃通用组合（深色） */
+  --glass-bg: rgba(255, 255, 255, 0.07);
+  --glass-bg-strong: rgba(255, 255, 255, 0.11);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --glass-blur: blur(20px) saturate(150%);
+
+  /* 滚动条（深色） */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  --scrollbar-track: transparent;
+
+  /* 占位符 / 图标（深色） */
+  --placeholder: rgba(228, 222, 248, 0.4);
+  --icon-soft: rgba(228, 222, 248, 0.45);
 }
 
 *,
@@ -43,25 +96,123 @@ ul {
   list-style: none;
 }
 
+html,
+body,
+#app {
+  height: 100%;
+}
+
+/* 应用内容层叠在背景光斑之上 */
+#app {
+  position: relative;
+  z-index: 1;
+}
+
 body {
-  min-height: 100vh;
-  color: var(--color-text);
-  background: var(--color-background);
+  color: var(--text);
+  background-color: var(--bg);
+  background-image: var(--bg-gradient);
+  background-attachment: fixed;
   line-height: 1.6;
   font-family:
     Inter,
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Microsoft YaHei',
     -apple-system,
     BlinkMacSystemFont,
     'Segoe UI',
     Roboto,
-    Oxygen,
-    Ubuntu,
-    Cantarell,
-    'Fira Sans',
-    'Droid Sans',
-    'Helvetica Neue',
     sans-serif;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ---------- 液态玻璃背景光斑层 ----------
+   在面板后方提供可被 backdrop-filter 折射的色彩与光晕。 */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  z-index: 0;
+  border-radius: 50%;
+  filter: blur(70px);
+  pointer-events: none;
+  will-change: transform;
+}
+
+body::before {
+  width: 46vw;
+  height: 46vw;
+  top: -10vw;
+  left: -8vw;
+  background: radial-gradient(circle, rgba(255, 126, 185, 0.55), transparent 62%);
+  animation: float-a 18s ease-in-out infinite;
+}
+
+body::after {
+  width: 42vw;
+  height: 42vw;
+  bottom: -12vw;
+  right: -8vw;
+  background: radial-gradient(circle, rgba(125, 211, 252, 0.5), transparent 62%);
+  animation: float-b 22s ease-in-out infinite;
+}
+
+:root.dark body::before {
+  background: radial-gradient(circle, rgba(255, 126, 185, 0.4), transparent 62%);
+}
+
+:root.dark body::after {
+  background: radial-gradient(circle, rgba(138, 216, 255, 0.35), transparent 62%);
+}
+
+@keyframes float-a {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(6vw, 4vh) scale(1.12);
+  }
+}
+
+@keyframes float-b {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1.08);
+  }
+  50% {
+    transform: translate(-5vw, -3vh) scale(0.94);
+  }
+}
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
