@@ -5,11 +5,13 @@ import { extractEmotionTags } from '@shared/emotion'
 import { useChatStore } from '../stores/chat'
 import { useSettingsStore } from '../stores/settings'
 import { useAudioStore } from '../stores/audio'
+import { useEsp32Store } from '../stores/esp32'
 import Live2DStage from '../components/live2d/Live2DStage.vue'
 
 const chat = useChatStore()
 const settings = useSettingsStore()
 const audio = useAudioStore()
+const esp32 = useEsp32Store()
 const draft = ref('')
 const listEl = ref<HTMLElement | null>(null)
 
@@ -52,7 +54,9 @@ function formatTime(ts: number): string {
 }
 
 function speak(msg: ChatMessage): void {
-  void audio.speak(cleanContent(msg))
+  const text = cleanContent(msg)
+  if (esp32.connected) void esp32.sendTts(text)
+  else void audio.speak(text)
 }
 
 function onSttFinal(text: string): void {
@@ -78,9 +82,19 @@ watch(
     if (prev && !now && settings.tts.autoSpeak) {
       const last = chat.history[chat.history.length - 1]
       if (last && last.role === 'assistant' && last.content.trim()) {
-        void audio.speak(cleanContent(last))
+        const text = cleanContent(last)
+        if (esp32.connected) void esp32.sendTts(text)
+        else void audio.speak(text)
       }
     }
+  }
+)
+
+// ESP32 语音转写文本回填输入框
+watch(
+  () => esp32.voiceTextVersion,
+  () => {
+    if (esp32.voiceText) draft.value = esp32.voiceText
   }
 )
 

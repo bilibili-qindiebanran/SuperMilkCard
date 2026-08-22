@@ -16,6 +16,22 @@ import { streamChat, classifyEmotions } from './services/llm'
 import { synthesize } from './services/tts'
 import { transcribe } from './services/stt'
 import { listModels, importModel } from './services/live2dModels'
+import {
+  esp32Emitter,
+  discover,
+  connect,
+  disconnect,
+  getStatus as getEsp32Status,
+  listDevices,
+  sendChat,
+  sendTts
+} from './services/esp32'
+import {
+  perfEmitter,
+  start as perfStart,
+  stop as perfStop,
+  getLatest as getPerfLatest
+} from './services/perfMonitor'
 
 const active = new Map<string, AbortController>()
 
@@ -153,4 +169,32 @@ export function registerIpc(): void {
     setSettings({ live2d: { ...getSettings().live2d, modelUrl, enabled: true } })
     return { models, modelUrl }
   })
+
+  // ESP32 连接 / 发现
+  discover()
+  ipcMain.handle('esp32:connect', () => connect())
+  ipcMain.handle('esp32:disconnect', () => disconnect())
+  ipcMain.handle('esp32:get-status', () => getEsp32Status())
+  ipcMain.handle('esp32:discover', () => discover())
+  ipcMain.handle('esp32:list-devices', () => listDevices())
+  ipcMain.handle('esp32:send-chat', (_e, role: 'user' | 'assistant', content: string) =>
+    sendChat(role, content)
+  )
+  ipcMain.handle('esp32:send-tts', (_e, text: string) => sendTts(text))
+
+  // 性能监测
+  ipcMain.handle('perf:start', () => perfStart())
+  ipcMain.handle('perf:stop', () => perfStop())
+  ipcMain.handle('perf:get-latest', () => getPerfLatest())
+
+  // 主进程 → 渲染进程 事件广播
+  const broadcast = (channel: string, data: unknown): void => {
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, data)
+  }
+  esp32Emitter.on('status', (s) => broadcast('esp32:status', s))
+  esp32Emitter.on('devices', (d) => broadcast('esp32:devices', d))
+  esp32Emitter.on('text', (m) => broadcast('esp32:text', m))
+  esp32Emitter.on('voice-text', (m) => broadcast('esp32:voice-text', m))
+  esp32Emitter.on('error', (m) => broadcast('esp32:error', m))
+  perfEmitter.on('sample', (s) => broadcast('perf:sample', s))
 }

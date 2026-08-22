@@ -3,7 +3,9 @@ import type {
   ApiKeySection,
   ApiKeyTestRequest,
   ApiKeyTestResult,
+  Esp32Config,
   Live2dConfig,
+  PerfConfig,
   Persona,
   PublicAppSettings,
   PublicLlmConfig,
@@ -57,6 +59,8 @@ export const useSettingsStore = defineStore('settings', {
     tts: (s): PublicTtsConfig => s.data.tts,
     stt: (s): PublicSttConfig => s.data.stt,
     live2d: (s): Live2dConfig => s.data.live2d,
+    esp32: (s): Esp32Config => s.data.esp32,
+    perf: (s): PerfConfig => s.data.perf,
     theme: (s): ThemeMode => s.data.theme
   },
   actions: {

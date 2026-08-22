@@ -28,7 +28,9 @@
     "pinia": "^4.0.3",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
-    "vue-router": "^5.2.0"
+    "systeminformation": "^5.25.11",
+    "vue-router": "^5.2.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "3.0.0",
