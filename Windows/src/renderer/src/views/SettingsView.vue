@@ -4,6 +4,8 @@ import {
   NAlert,
   NButton,
   NCard,
+  NCheckbox,
+  NCheckboxGroup,
   NDivider,
   NForm,
   NFormItem,
@@ -14,6 +16,8 @@ import {
 } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
 import { useLive2dStore } from '../stores/live2d'
+import { useEsp32Store } from '../stores/esp32'
+import { usePerfStore } from '../stores/perf'
 import {
   EXPRESSION_SEMANTICS,
   EXPRESSION_SEMANTIC_LABELS,
@@ -25,16 +29,75 @@ import {
 import type { ExpressionSemantic, TierEntry } from '../services/live2dModel'
 import ApiKeySetting from '../components/ApiKeySetting.vue'
 import { DEFAULT_SETTINGS } from '@shared/types'
-import type { Live2dConfig, Persona, PublicAppSettings, ThemeMode } from '@shared/types'
+import type { Esp32Device, Live2dConfig, Persona, PublicAppSettings, ThemeMode } from '@shared/types'
 
 const settings = useSettingsStore()
 const live2d = useLive2dStore()
+const esp32 = useEsp32Store()
+const perf = usePerfStore()
 const savedTip = ref(false)
 const live2dTip = ref('')
 const importing = ref(false)
 const dragging = ref(false)
 const reidentifying = ref(false)
 const aiIdentifying = ref(false)
+const selectedDevice = ref<string | null>(null)
+
+const deviceOptions = computed(() =>
+  esp32.devices.map((d: Esp32Device) => ({
+    label: `${d.id}${d.name ? ` · ${d.name}` : ''}`,
+    value: d.id
+  }))
+)
+
+const esp32StateLabel = computed(() => {
+  const map: Record<string, string> = {
+    idle: '未连接',
+    connecting: '连接中',
+    connected: '已连接',
+    reconnecting: '重连中',
+    error: '错误'
+  }
+  return map[esp32.status.state] ?? esp32.status.state
+})
+
+const perfMetricOptions = [
+  { label: 'CPU 使用率', value: 'cpu' },
+  { label: 'GPU 使用率', value: 'gpu' },
+  { label: '内存使用率', value: 'memory' }
+]
+
+function fmtPercent(v: number | null | undefined): string {
+  return v == null ? '—' : `${v}%`
+}
+
+async function discoverDevices(): Promise<void> {
+  await esp32.discover()
+}
+
+function onSelectDevice(id: string | null): void {
+  if (!id) return
+  const d = esp32.devices.find((x) => x.id === id)
+  if (!d) return
+  settings.esp32.deviceId = d.id
+  settings.esp32.host = d.host
+  settings.esp32.tcpPort = d.tcpPort || settings.esp32.tcpPort
+  settings.esp32.wsPort = d.wsPort || settings.esp32.wsPort
+  selectedDevice.value = null
+}
+
+async function onToggleConnect(): Promise<void> {
+  await settings.save({ esp32: JSON.parse(JSON.stringify(settings.esp32)) })
+  if (esp32.connected) await esp32.disconnect()
+  else await esp32.connect()
+}
+
+async function onPerfToggle(v: boolean): Promise<void> {
+  settings.perf.enabled = v
+  await settings.save({ perf: JSON.parse(JSON.stringify(settings.perf)) })
+  if (v) await perf.start()
+  else await perf.stop()
+}
 
 /** 深拷贝 Live2D 配置，避免草稿与 store 共享同一个响应式对象 */
 function cloneLive2d(cfg: Live2dConfig): Live2dConfig {
@@ -190,6 +253,16 @@ async function onModelChange(modelUrl: string): Promise<void> {
   // 只写草稿，点「保存设置」后生效；选择模型时视为需启用
   live2dDraft.value.modelUrl = modelUrl
   live2dDraft.value.enabled = true
+  // 切换模型后立即重新解析该模型的表情，刷新「表情映射」模块预览，无需等「保存设置」
+  live2dTip.value = ''
+  reidentifying.value = true
+  try {
+    await live2d.reidentifyExpressions(modelUrl)
+  } catch (err) {
+    live2dTip.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    reidentifying.value = false
+  }
 }
 
 async function onReidentifyExpressions(): Promise<void> {
@@ -543,6 +616,100 @@ async function reset(): Promise<void> {
         </n-form>
       </n-card>
 
+      <n-card title="ESP32 连接" size="small">
+        <n-form label-placement="top" :show-feedback="false">
+          <n-form-item label="启用 ESP32">
+            <n-switch v-model:value="settings.esp32.enabled" />
+          </n-form-item>
+          <n-form-item label="识别码（硬件 ID）">
+            <div class="esp32-discover">
+              <n-input
+                v-model:value="settings.esp32.deviceId"
+                placeholder="如 esp32_xxxx / MAC 地址"
+              />
+              <n-button size="small" @click="discoverDevices()">发现设备</n-button>
+            </div>
+          </n-form-item>
+          <n-form-item v-if="esp32.devices.length > 0" label="已发现设备">
+            <n-select
+              v-model:value="selectedDevice"
+              :options="deviceOptions"
+              placeholder="选择设备以自动填充连接参数"
+              clearable
+              @update:value="onSelectDevice"
+            />
+          </n-form-item>
+          <n-form-item label="主机地址">
+            <n-input
+              v-model:value="settings.esp32.host"
+              placeholder="192.168.1.x（未发现设备时手动填写）"
+            />
+          </n-form-item>
+          <div class="form-row">
+            <n-form-item label="TCP 端口">
+              <n-input-number v-model:value="settings.esp32.tcpPort" :min="1" :max="65535" />
+            </n-form-item>
+            <n-form-item label="WebSocket 端口">
+              <n-input-number v-model:value="settings.esp32.wsPort" :min="1" :max="65535" />
+            </n-form-item>
+          </div>
+          <n-form-item label="重连基础间隔（毫秒）">
+            <n-input-number
+              v-model:value="settings.esp32.reconnectIntervalMs"
+              :min="100"
+              :step="100"
+            />
+          </n-form-item>
+          <div class="esp32-status">
+            <span class="esp32-state" :class="esp32.status.state">
+              状态：{{ esp32StateLabel }}
+            </span>
+            <span v-if="esp32.status.message" class="esp32-msg">{{ esp32.status.message }}</span>
+          </div>
+          <n-button size="small" type="primary" @click="onToggleConnect()">
+            {{ esp32.connected ? '断开' : '连接' }}
+          </n-button>
+          <n-alert
+            v-if="esp32.error || esp32.lastText"
+            type="info"
+            size="small"
+            style="margin-top: 12px"
+          >
+            <template v-if="esp32.error">{{ esp32.error }}</template>
+            <template v-else>ESP32 消息：{{ esp32.lastText }}</template>
+          </n-alert>
+        </n-form>
+      </n-card>
+
+      <n-card title="性能监测" size="small">
+        <n-form label-placement="top" :show-feedback="false">
+          <n-form-item label="启用监测">
+            <n-switch :value="settings.perf.enabled" @update:value="onPerfToggle" />
+          </n-form-item>
+          <n-form-item label="监测项目">
+            <n-checkbox-group v-model:value="settings.perf.metrics">
+              <n-checkbox
+                v-for="m in perfMetricOptions"
+                :key="m.value"
+                :value="m.value"
+                :label="m.label"
+              />
+            </n-checkbox-group>
+          </n-form-item>
+          <n-form-item label="采样间隔（毫秒）">
+            <n-input-number v-model:value="settings.perf.intervalMs" :min="200" :step="100" />
+          </n-form-item>
+          <n-form-item label="通过 WebSocket 推送">
+            <n-switch v-model:value="settings.perf.pushOverWs" />
+          </n-form-item>
+          <div class="perf-preview">
+            <span>CPU：{{ fmtPercent(perf.latest?.cpu) }}</span>
+            <span>GPU：{{ fmtPercent(perf.latest?.gpu) }}</span>
+            <span>内存：{{ fmtPercent(perf.latest?.memory) }}</span>
+          </div>
+        </n-form>
+      </n-card>
+
       <n-card title="外观" size="small">
         <n-form label-placement="top" :show-feedback="false">
           <n-form-item label="主题">
@@ -634,5 +801,43 @@ async function reset(): Promise<void> {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.esp32-discover {
+  display: flex;
+  gap: 8px;
+}
+
+.esp32-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.esp32-state {
+  color: var(--text-2);
+}
+
+.esp32-state.connected {
+  color: #3fb68b;
+}
+
+.esp32-state.error {
+  color: #ff6b81;
+}
+
+.esp32-msg {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.perf-preview {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-2);
 }
 </style>

@@ -4,6 +4,7 @@ import { estimateTokens, trimToContext } from '@shared/context'
 import { extractEmotionTags, stripEmotionInstruction } from '@shared/emotion'
 import { useSettingsStore } from './settings'
 import { useLive2dStore } from './live2d'
+import { useEsp32Store } from './esp32'
 
 let seq = 0
 function uid(): string {
@@ -38,6 +39,7 @@ export const useChatStore = defineStore('chat', {
       const content = text.trim()
       if (!content || this.streaming) return
       this.history.push({ id: uid(), role: 'user', content, createdAt: Date.now() })
+      void useEsp32Store().sendChat('user', content)
       this.runRequest()
     },
 
@@ -127,6 +129,7 @@ export const useChatStore = defineStore('chat', {
 
     handleDone(e: LlmDone): void {
       if (e.chatId !== this.streamingChatId) return
+      if (e.fullText.trim()) void useEsp32Store().sendChat('assistant', e.fullText.trim())
       this.finishStream()
     },
 

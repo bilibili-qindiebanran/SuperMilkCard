@@ -59,6 +59,82 @@ export interface SttConfig {
   apiKey: string
 }
 
+/** ESP32 连接配置 */
+export interface Esp32Config {
+  /** 是否启用 ESP32 连接 */
+  enabled: boolean
+  /** 设备识别码（芯片 ID / MAC 地址），用于局域网发现与连接校验 */
+  deviceId: string
+  /** 手动配置的主机地址（设备未自动发现时使用） */
+  host: string
+  /** ESP32 TCP 服务器端口 */
+  tcpPort: number
+  /** ESP32 WebSocket 服务器端口（性能数据推送） */
+  wsPort: number
+  /** 重连基础间隔（毫秒），实际按退避递增、上限 30s */
+  reconnectIntervalMs: number
+}
+
+/** 局域网内发现的 ESP32 设备 */
+export interface Esp32Device {
+  id: string
+  name: string
+  host: string
+  tcpPort: number
+  wsPort: number
+  lastSeen: number
+}
+
+/** 性能监测项目 */
+export type PerfMetric = 'cpu' | 'gpu' | 'memory'
+
+/** 性能监测配置 */
+export interface PerfConfig {
+  enabled: boolean
+  /** 采样间隔（毫秒） */
+  intervalMs: number
+  /** 选中的监测项目 */
+  metrics: PerfMetric[]
+  /** 是否通过 WebSocket 推送至 ESP32 */
+  pushOverWs: boolean
+}
+
+/** ESP32 连接状态 */
+export type Esp32ConnectionState =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'error'
+
+export interface Esp32Status {
+  connected: boolean
+  state: Esp32ConnectionState
+  message: string
+}
+
+export interface PerfSample {
+  ts: number
+  cpu?: number | null
+  gpu?: number | null
+  memory?: number | null
+}
+
+/** ESP32 → 软件 的文本消息 */
+export interface Esp32TextMessage {
+  content: string
+}
+
+/** ESP32 语音转写结果 */
+export interface Esp32VoiceTextMessage {
+  text: string
+}
+
+export interface Esp32SendResult {
+  ok: boolean
+  message?: string
+}
+
 export type ThemeMode = 'light' | 'dark'
 
 /** 可经 IPC 下发到渲染层的密钥部分（用于设置 Key / 清除 Key） */
@@ -97,6 +173,8 @@ export interface AppSettings {
   tts: TtsConfig
   stt: SttConfig
   live2d: Live2dConfig
+  esp32: Esp32Config
+  perf: PerfConfig
   theme: ThemeMode
 }
 
@@ -145,6 +223,8 @@ export interface PublicAppSettings {
   tts: PublicTtsConfig
   stt: PublicSttConfig
   live2d: Live2dConfig
+  esp32: Esp32Config
+  perf: PerfConfig
   theme: ThemeMode
 }
 
@@ -156,6 +236,8 @@ export interface SettingsPatch {
   personas?: Persona[]
   activePersonaId?: string
   live2d?: Live2dConfig
+  esp32?: Partial<Esp32Config>
+  perf?: Partial<PerfConfig>
   theme?: ThemeMode
 }
 
@@ -192,6 +274,8 @@ export function toPublicSettings(s: AppSettings): PublicAppSettings {
       maskedKey: maskKey(s.stt.apiKey)
     },
     live2d: s.live2d,
+    esp32: s.esp32,
+    perf: s.perf,
     theme: s.theme
   }
 }
@@ -306,6 +390,30 @@ export interface RendererApi {
     /** 在 preload 中用 webUtils.getPathForFile 获取拖拽文件的绝对路径 */
     getPathForFile(file: File): string
   }
+  esp32: {
+    connect(): Promise<Esp32Status>
+    disconnect(): Promise<Esp32Status>
+    getStatus(): Promise<Esp32Status>
+    /** 触发一次局域网设备发现 */
+    discover(): Promise<Esp32Device[]>
+    /** 获取已发现的设备列表 */
+    listDevices(): Promise<Esp32Device[]>
+    /** 发送聊天文本到 ESP32 */
+    sendChat(role: 'user' | 'assistant', content: string): Promise<Esp32SendResult>
+    /** 文本转语音后发送到 ESP32 */
+    sendTts(text: string): Promise<Esp32SendResult>
+    onStatus(cb: (s: Esp32Status) => void): () => void
+    onDevices(cb: (d: Esp32Device[]) => void): () => void
+    onText(cb: (m: Esp32TextMessage) => void): () => void
+    onVoiceText(cb: (m: Esp32VoiceTextMessage) => void): () => void
+    onError(cb: (m: { message: string }) => void): () => void
+  }
+  perf: {
+    start(): Promise<void>
+    stop(): Promise<void>
+    getLatest(): Promise<PerfSample | null>
+    onSample(cb: (s: PerfSample) => void): () => void
+  }
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -366,6 +474,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
     tierAdditions: {},
     tierRemovals: {},
     expressionEmotions: {}
+  },
+  esp32: {
+    enabled: false,
+    deviceId: '',
+    host: '',
+    tcpPort: 9000,
+    wsPort: 9001,
+    reconnectIntervalMs: 1000
+  },
+  perf: {
+    enabled: false,
+    intervalMs: 1000,
+    metrics: ['cpu', 'memory'],
+    pushOverWs: true
   },
   theme: 'light'
 }
