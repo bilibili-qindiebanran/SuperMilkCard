@@ -1,6 +1,13 @@
 import { defineStore } from 'pinia'
-import type { ChatMessage, LlmAborted, LlmChunk, LlmDone, LlmError } from '@shared/types'
-import { estimateTokens, trimToContext } from '@shared/context'
+import type {
+  ChatMessage,
+  ImageAttachment,
+  LlmAborted,
+  LlmChunk,
+  LlmDone,
+  LlmError
+} from '@shared/types'
+import { estimateMessageTokens, trimToContext } from '@shared/context'
 import { extractEmotionTags, stripEmotionInstruction } from '@shared/emotion'
 import { useSettingsStore } from './settings'
 import { useLive2dStore } from './live2d'
@@ -24,7 +31,7 @@ export const useChatStore = defineStore('chat', {
   }),
   getters: {
     tokenCount(state): number {
-      return state.history.reduce((acc, m) => acc + estimateTokens(m.content), 0)
+      return state.history.reduce((acc, m) => acc + estimateMessageTokens(m), 0)
     }
   },
   actions: {
@@ -35,11 +42,13 @@ export const useChatStore = defineStore('chat', {
       window.api.llm.onAborted((e: LlmAborted) => this.handleAborted(e))
     },
 
-    send(text: string): void {
+    send(text: string, images: ImageAttachment[] = []): void {
       const content = text.trim()
-      if (!content || this.streaming) return
-      this.history.push({ id: uid(), role: 'user', content, createdAt: Date.now() })
-      void useEsp32Store().sendChat('user', content)
+      if ((!content && images.length === 0) || this.streaming) return
+      const user: ChatMessage = { id: uid(), role: 'user', content, createdAt: Date.now() }
+      if (images.length) user.images = images
+      this.history.push(user)
+      void useEsp32Store().sendChat('user', content || '[图片]')
       this.runRequest()
     },
 

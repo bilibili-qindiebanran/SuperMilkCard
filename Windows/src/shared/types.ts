@@ -6,7 +6,35 @@ export interface ChatMessage {
   id: string
   role: Role
   content: string
+  /** 多模态图片附件（仅用户消息可携带） */
+  images?: ImageAttachment[]
   createdAt: number
+}
+
+/** 用户发送的图片附件（以 data URL 形式随消息传递，供多模态 LLM 使用） */
+export interface ImageAttachment {
+  /** data URL，形如 data:image/<mime>;base64,... */
+  dataUrl: string
+  /** MIME 类型，如 image/png */
+  mimeType: string
+  /** 文件名（可选，仅用于展示） */
+  name?: string
+}
+
+/** OpenAI 兼容的多模态消息内容片段 */
+export type ContentPart =
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
+
+/** 把消息（文本 + 可选图片）转成 OpenAI 兼容的 content：无图时保持纯字符串，有图时用片段数组 */
+export function buildMessageContent(msg: {
+  content: string
+  images?: ImageAttachment[]
+}): string | ContentPart[] {
+  if (!msg.images || msg.images.length === 0) return msg.content
+  const parts: ContentPart[] = []
+  if (msg.content) parts.push({ type: 'text', text: msg.content })
+  for (const img of msg.images) parts.push({ type: 'image_url', image_url: { url: img.dataUrl } })
+  return parts
 }
 
 /** LLM 相关配置 */
@@ -100,12 +128,7 @@ export interface PerfConfig {
 }
 
 /** ESP32 连接状态 */
-export type Esp32ConnectionState =
-  | 'idle'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'error'
+export type Esp32ConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error'
 
 export interface Esp32Status {
   connected: boolean
@@ -291,7 +314,7 @@ export function maskKey(key: string): string {
 /** 单次流式对话请求（渲染进程 → 主进程，仅携带必要数据，配置由主进程读取） */
 export interface ChatStreamRequest {
   chatId: string
-  messages: Array<{ role: Role; content: string }>
+  messages: Array<{ role: Role; content: string | ContentPart[] }>
 }
 
 /** 单个表达式的情绪标注输入（渲染进程 → 主进程，持久化/LLM 预填用） */
