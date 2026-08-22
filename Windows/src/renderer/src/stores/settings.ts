@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import type {
   ApiKeySection,
+  ApiKeyTestRequest,
+  ApiKeyTestResult,
   Live2dConfig,
   Persona,
   PublicAppSettings,
@@ -24,7 +26,9 @@ function cleanPersona(p: Persona): Persona {
 
 /** 发送前的补丁消毒：丢弃密钥相关字段（密钥修改走 setKey / clearKey） */
 function sanitizePatch(partial: Partial<PublicAppSettings>): SettingsPatch {
-  const next = { ...partial } as Record<string, unknown>
+  // 深拷贝：Vue/Pinia 会把嵌套对象（如 live2d.emotionOverrides）包装成响应式 Proxy，
+  // IPC 的 structuredClone 无法克隆 Proxy，会抛 DataCloneError。JSON 往返得到纯对象。
+  const next = JSON.parse(JSON.stringify(partial)) as Record<string, unknown>
   for (const sec of ['llm', 'tts', 'stt']) {
     const cfg = next[sec]
     if (cfg && typeof cfg === 'object') {
@@ -81,6 +85,14 @@ export const useSettingsStore = defineStore('settings', {
     },
     async clearKey(section: ApiKeySection): Promise<void> {
       this.data = await window.api.settings.clearKey(section)
+    },
+    async testKey(
+      section: ApiKeySection,
+      apiKey: string,
+      baseUrl: string
+    ): Promise<ApiKeyTestResult> {
+      const req: ApiKeyTestRequest = { section, apiKey, baseUrl }
+      return window.api.settings.testKey(req)
     },
 
     async setActivePersona(id: string): Promise<void> {
