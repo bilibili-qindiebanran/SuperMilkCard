@@ -1,0 +1,5 @@
+# 工程级 sdkconfig 默认配置（PlatformIO 自动合并到 sdkconfig.esp32-s3）
+
+# 主 console 走 USB-Serial/JTAG（原生 USB 口 COM10）
+# 已实测：固件从 flash 正常启动后，日志经 COM10 直接输出（无需外接 UART 桥）
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

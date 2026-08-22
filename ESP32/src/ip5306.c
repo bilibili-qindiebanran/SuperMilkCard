@@ -140,15 +140,17 @@ esp_err_t ip5306_get_status(ip5306_status_t *st)
 
 int ip5306_scan_bus(void)
 {
-    int found = 0;
-    for (uint8_t addr = 1; addr < 127; addr++) {
-        esp_err_t err = i2c_master_probe(s_bus, addr, pdMS_TO_TICKS(50));
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "I2C device found at 0x%02X%s", addr,
-                     (addr == IP5306_SLAVE_ADDR) ? "  <-- IP5306" : "");
-            found++;
-        }
+    /* 注意：i2c_master_probe 对 IP5306 这类"必须写寄存器地址才能读"的从机
+     * 不适用（probe 只发地址+读，IP5306 不响应），会全部超时。
+     * 因此这里改为直接尝试读 REG_READ0(0x70) 验证从机是否在线。 */
+    ESP_LOGI(TAG, "checking IP5306 at 0x%02X (SDA=%d, SCL=%d)...",
+             IP5306_SLAVE_ADDR, IP5306_PIN_SDA, IP5306_PIN_SCL);
+    uint8_t v = 0;
+    esp_err_t err = ip5306_read_reg(IP5306_REG_READ0, &v);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "IP5306 found at 0x%02X, REG_READ0(0x70)=0x%02X", IP5306_SLAVE_ADDR, v);
+        return 1;
     }
-    ESP_LOGI(TAG, "scan done, %d device(s) found", found);
-    return found;
+    ESP_LOGE(TAG, "IP5306 not responding at 0x%02X: %s", IP5306_SLAVE_ADDR, esp_err_to_name(err));
+    return 0;
 }
