@@ -311,6 +311,126 @@
   font-size: 14px;
 }
 
+.bubble-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.bubble-image {
+  max-width: 180px;
+  max-height: 180px;
+  border-radius: 10px;
+  object-fit: cover;
+  display: block;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  cursor: zoom-in;
+}
+
+/* 图片放大预览浮层 */
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(10, 8, 20, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  cursor: zoom-out;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+  animation: viewer-in 0.18s ease;
+}
+
+.image-viewer.is-zoomed {
+  cursor: grab;
+}
+
+.image-viewer.is-dragging,
+.image-viewer.is-dragging .image-viewer-img {
+  cursor: grabbing;
+}
+
+.image-viewer-img {
+  max-width: 92vw;
+  max-height: 92vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+  cursor: zoom-in;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.image-viewer.is-zoomed .image-viewer-img {
+  cursor: grab;
+}
+
+.image-viewer-close {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s;
+}
+
+.image-viewer-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.image-viewer-reset {
+  position: absolute;
+  top: 20px;
+  right: 76px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.image-viewer-reset:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.image-viewer-hint {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.12);
+  padding: 6px 14px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+@keyframes viewer-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .bubble-foot {
   display: flex;
   align-items: center;
@@ -487,7 +607,8 @@
     background 0.15s;
 }
 
-.mic-btn:hover {
+.mic-btn:hover,
+.img-btn:hover {
   border-color: var(--primary);
 }
 
@@ -500,12 +621,90 @@
   background: rgba(255, 107, 129, 0.18);
 }
 
+.chat-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.attachment-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-item {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight);
+}
+
+.attachment-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  border: none;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s;
+}
+
+.attachment-remove:hover {
+  background: rgba(229, 72, 77, 0.9);
+}
+
+.chat-file-error {
+  font-size: 12px;
+  color: var(--danger);
+}
+
 .chat-input {
   display: flex;
   align-items: flex-end;
   gap: 10px;
-  padding: 14px 20px 16px;
-  border-top: 1px solid var(--glass-border);
+}
+
+.file-input {
+  display: none;
+}
+
+.img-btn {
+  appearance: none;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 17px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  box-shadow: var(--glass-highlight);
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .chat-textarea {
