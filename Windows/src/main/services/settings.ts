@@ -44,6 +44,11 @@ export function getSettings(): AppSettings {
 export function setSettings(partial: Partial<AppSettings>): AppSettings {
   const current = getSettings()
   const next = deepMerge(current, partial) as AppSettings
+  // emotionOverrides 由渲染层整体提交（含「清除某语义」的删除语义），
+  // deepMerge 无法删除键，会把已清除的覆盖残留下来，故这里整体替换。
+  if (partial.live2d?.emotionOverrides) {
+    next.live2d.emotionOverrides = partial.live2d.emotionOverrides
+  }
   return persist(next)
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   NAlert,
   NButton,
@@ -14,9 +14,18 @@ import {
 } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
 import { useLive2dStore } from '../stores/live2d'
-import { EXPRESSION_SEMANTICS, EXPRESSION_SEMANTIC_LABELS } from '../services/live2dModel'
-import type { ExpressionSemantic } from '../services/live2dModel'
-import type { ApiKeySection, Persona, ThemeMode } from '@shared/types'
+import {
+  EXPRESSION_SEMANTICS,
+  EXPRESSION_SEMANTIC_LABELS,
+  mergeTiers,
+  tierLabel,
+  tierKey,
+  parseTierKey
+} from '../services/live2dModel'
+import type { ExpressionSemantic, TierEntry } from '../services/live2dModel'
+import ApiKeySetting from '../components/ApiKeySetting.vue'
+import { DEFAULT_SETTINGS } from '@shared/types'
+import type { Live2dConfig, Persona, PublicAppSettings, ThemeMode } from '@shared/types'
 
 const settings = useSettingsStore()
 const live2d = useLive2dStore()
@@ -24,10 +33,25 @@ const savedTip = ref(false)
 const live2dTip = ref('')
 const importing = ref(false)
 const dragging = ref(false)
-/** 密钥输入仅存于本地 ref，不回填真实值；保存时通过 setKey 写入主进程 */
-const llmKeyInput = ref('')
-const ttsKeyInput = ref('')
-const sttKeyInput = ref('')
+const reidentifying = ref(false)
+const aiIdentifying = ref(false)
+
+/** 深拷贝 Live2D 配置，避免草稿与 store 共享同一个响应式对象 */
+function cloneLive2d(cfg: Live2dConfig): Live2dConfig {
+  return JSON.parse(JSON.stringify(cfg))
+}
+
+/** Live2D 模块草稿：编辑后需点「保存设置」才持久化，与全局保存解耦 */
+const live2dDraft = ref<Live2dConfig>(cloneLive2d(settings.live2d))
+
+// 设置异步加载完成后同步一次草稿，避免首次进入时草稿仍停留在默认值
+watch(
+  () => settings.loaded,
+  (loaded) => {
+    if (loaded) live2dDraft.value = cloneLive2d(settings.live2d)
+  },
+  { immediate: true }
+)
 
 const engineOptions = [
   { label: '系统语音（免费）', value: 'system' },
@@ -62,15 +86,92 @@ const expressionOptions = computed(() =>
   live2d.expressionIds.map((id) => ({ label: expressionLabel(id), value: id }))
 )
 
-/** 读取某语义的手动覆盖值：空串表示「自动（跟随推理）」，与占位符一致 */
-function emotionOverrideValue(semantic: ExpressionSemantic): string {
-  const name = live2d.currentModelName()
-  return settings.live2d.emotionOverrides[name]?.[semantic] ?? ''
+/** 当前模型名（目录名）：live2d://murasame/Murasame.model3.json -> murasame（取自草稿，与保存解耦） */
+function draftModelName(): string {
+  const raw = live2dDraft.value.modelUrl.replace(/^live2d:\/\//, '')
+  return raw.split('/')[0] ?? ''
 }
 
-function onEmotionOverrideChange(semantic: ExpressionSemantic, value: unknown): void {
-  // clearable 时会收到 null；统一转成空串表示「自动」
-  void live2d.setEmotionOverride(semantic, (value as string) ?? '')
+/** 当前生效档位列表（自动识别 + 用户新增 - 用户移除），用于映射区渲染 */
+const pendingTiers = computed<TierEntry[]>(() => {
+  const name = draftModelName()
+  const additions = live2dDraft.value.tierAdditions[name] ?? []
+  const removals = live2dDraft.value.tierRemovals[name] ?? []
+  return mergeTiers(live2d.autoTiers, additions, removals)
+})
+
+/** 档位显示标签：开心 / 更开心 / 非常开心 */
+function tierEntryLabel(t: TierEntry): string {
+  return tierLabel(t.semantic, t.level)
+}
+
+/** 读取某档位（tierKey）的手动覆盖值：空串表示「自动（跟随推理）」 */
+function emotionOverrideValue(tier: string): string {
+  return live2dDraft.value.emotionOverrides[draftModelName()]?.[tier] ?? ''
+}
+
+/** 占位符：无覆盖时显示自动识别生效的表情，既是「自动」又与「当前生效」保持一致 */
+function emotionPlaceholder(tier: string): string {
+  const autoId = live2d.autoEmotionToId[tier] ?? live2d.emotionToId[tier]
+  return autoId ? `自动（跟随推理）：${expressionLabel(autoId)}` : '自动（跟随推理）'
+}
+
+/** 下拉显示值：优先手动覆盖，其次自动推理生效值，确保下拉始终展示「当前生效」的表情 */
+function emotionDisplayValue(tier: string): string {
+  return (
+    emotionOverrideValue(tier) ||
+    live2d.autoEmotionToId[tier] ||
+    live2d.emotionToId[tier] ||
+    ''
+  )
+}
+
+function onEmotionOverrideChange(tier: string, value: unknown): void {
+  // clearable 时会收到 null；统一转成空串表示「自动」，先写入草稿
+  const name = draftModelName()
+  const existing = { ...(live2dDraft.value.emotionOverrides[name] ?? {}) }
+  const id = (value as string) ?? ''
+  if (id) existing[tier] = id
+  else delete existing[tier]
+  live2dDraft.value.emotionOverrides = { ...live2dDraft.value.emotionOverrides, [name]: existing }
+}
+
+/** 添加档位：目标语义（排除 neutral 默认脸）与待选项 */
+const addTierSemantic = ref<ExpressionSemantic>('happy')
+const addableSemantics = computed(() =>
+  EXPRESSION_SEMANTICS.filter((s) => s !== 'neutral').map((s) => ({
+    label: EXPRESSION_SEMANTIC_LABELS[s],
+    value: s
+  }))
+)
+
+/** 手动为某语义新增一档（下一等级），写入草稿待保存 */
+function addTier(semantic: ExpressionSemantic): void {
+  const name = draftModelName()
+  const maxLevel = pendingTiers.value
+    .filter((t) => t.semantic === semantic)
+    .reduce((m, t) => Math.max(m, t.level), 1)
+  const next = tierKey(semantic, maxLevel + 1)
+  const additions = [...(live2dDraft.value.tierAdditions[name] ?? []), next]
+  live2dDraft.value.tierAdditions = {
+    ...live2dDraft.value.tierAdditions,
+    [name]: [...new Set(additions)]
+  }
+}
+
+/** 手动删除一档：清除其覆盖；自动档并入移除列表，用户新增档从新增列表剔除 */
+function removeTier(tier: string): void {
+  const name = draftModelName()
+  if (!parseTierKey(tier)) return
+  const autoHas = live2d.autoTiers.some((t) => t.key === tier)
+  const ov = { ...(live2dDraft.value.emotionOverrides[name] ?? {}) }
+  delete ov[tier]
+  const additions = (live2dDraft.value.tierAdditions[name] ?? []).filter((k) => k !== tier)
+  let removals = live2dDraft.value.tierRemovals[name] ?? []
+  if (autoHas) removals = [...new Set([...removals, tier])]
+  live2dDraft.value.emotionOverrides = { ...live2dDraft.value.emotionOverrides, [name]: ov }
+  live2dDraft.value.tierAdditions = { ...live2dDraft.value.tierAdditions, [name]: additions }
+  live2dDraft.value.tierRemovals = { ...live2dDraft.value.tierRemovals, [name]: removals }
 }
 
 onMounted(() => {
@@ -86,7 +187,42 @@ function onThemeChange(theme: ThemeMode): void {
 }
 
 async function onModelChange(modelUrl: string): Promise<void> {
-  await live2d.switchModel(modelUrl)
+  // 只写草稿，点「保存设置」后生效；选择模型时视为需启用
+  live2dDraft.value.modelUrl = modelUrl
+  live2dDraft.value.enabled = true
+}
+
+async function onReidentifyExpressions(): Promise<void> {
+  if (reidentifying.value) return
+  reidentifying.value = true
+  live2dTip.value = ''
+  try {
+    await live2d.reidentifyExpressions(live2dDraft.value.modelUrl)
+    live2dTip.value = '已重新识别模型表情'
+  } catch (err) {
+    live2dTip.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    reidentifying.value = false
+  }
+}
+
+/** 用 LLM 预填当前模型的「表情 → 情绪@等级」标注并刷新映射 */
+async function onAiAnalyze(): Promise<void> {
+  if (aiIdentifying.value) return
+  if (!settings.llm.hasApiKey) {
+    live2dTip.value = '请先在「大模型」中配置 API Key，再使用 AI 识别'
+    return
+  }
+  aiIdentifying.value = true
+  live2dTip.value = ''
+  try {
+    await live2d.analyzeWithLlm()
+    live2dTip.value = '已用 AI 重新识别表情'
+  } catch (err) {
+    live2dTip.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    aiIdentifying.value = false
+  }
 }
 
 async function onDropModel(e: DragEvent): Promise<void> {
@@ -100,8 +236,9 @@ async function onDropModel(e: DragEvent): Promise<void> {
     const path = window.api.live2d.getPathForFile(file)
     const { models, modelUrl } = await window.api.live2d.importModel(path)
     live2d.models = models
-    await live2d.switchModel(modelUrl)
-    live2dTip.value = `已导入并启用模型：${modelUrl}`
+    live2dDraft.value.modelUrl = modelUrl
+    live2dDraft.value.enabled = true
+    live2dTip.value = `已导入模型：${modelUrl}（点「保存设置」后启用）`
   } catch (err) {
     live2dTip.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -126,39 +263,29 @@ function removeActivePersona(): void {
   void settings.deletePersona(settings.activePersonaId)
 }
 
-async function save(): Promise<void> {
-  await settings.save(JSON.parse(JSON.stringify(settings.data)))
-  // 仅当用户本次输入了非空密钥时才覆盖写入，写入后清空本地输入
-  if (llmKeyInput.value) {
-    await settings.setKey('llm', llmKeyInput.value)
-    llmKeyInput.value = ''
-  }
-  if (ttsKeyInput.value) {
-    await settings.setKey('tts', ttsKeyInput.value)
-    ttsKeyInput.value = ''
-  }
-  if (sttKeyInput.value) {
-    await settings.setKey('stt', sttKeyInput.value)
-    sttKeyInput.value = ''
-  }
-  savedTip.value = true
-  window.setTimeout(() => (savedTip.value = false), 2000)
+async function saveLive2d(): Promise<void> {
+  await settings.save({ live2d: cloneLive2d(live2dDraft.value) })
+  live2dTip.value = '已保存 Live2D 设置'
 }
 
-async function clearKey(section: ApiKeySection): Promise<void> {
-  await settings.clearKey(section)
-  if (section === 'llm') llmKeyInput.value = ''
-  if (section === 'tts') ttsKeyInput.value = ''
-  if (section === 'stt') sttKeyInput.value = ''
+async function resetLive2d(): Promise<void> {
+  live2dDraft.value = cloneLive2d(DEFAULT_SETTINGS.live2d)
+  await settings.save({ live2d: cloneLive2d(DEFAULT_SETTINGS.live2d) })
+  live2dTip.value = '已恢复 Live2D 默认设置'
+}
+
+async function save(): Promise<void> {
+  // 全局保存时把 Live2D 草稿一并写入，保证两处保存口径一致
+  const payload = JSON.parse(JSON.stringify(settings.data)) as PublicAppSettings
+  payload.live2d = cloneLive2d(live2dDraft.value)
+  await settings.save(payload)
   savedTip.value = true
   window.setTimeout(() => (savedTip.value = false), 2000)
 }
 
 async function reset(): Promise<void> {
   await settings.reset()
-  llmKeyInput.value = ''
-  ttsKeyInput.value = ''
-  sttKeyInput.value = ''
+  live2dDraft.value = cloneLive2d(DEFAULT_SETTINGS.live2d)
   savedTip.value = true
   window.setTimeout(() => (savedTip.value = false), 2000)
 }
@@ -180,24 +307,7 @@ async function reset(): Promise<void> {
             <n-input v-model:value="settings.llm.baseUrl" placeholder="https://api.openai.com/v1" />
           </n-form-item>
           <n-form-item label="API Key">
-            <div class="key-row">
-              <n-input
-                v-model:value="llmKeyInput"
-                type="password"
-                show-password-on="click"
-                :placeholder="settings.llm.hasApiKey ? '已配置（输入新值可更换）' : 'sk-...'"
-              />
-              <n-button
-                v-if="settings.llm.hasApiKey"
-                size="small"
-                type="error"
-                quaternary
-                @click="clearKey('llm')"
-              >
-                清除
-              </n-button>
-            </div>
-            <span v-if="settings.llm.hasApiKey" class="key-status">已配置，密钥不回显。</span>
+            <ApiKeySetting section="llm" />
           </n-form-item>
           <n-form-item label="模型">
             <n-input v-model:value="settings.llm.model" placeholder="gpt-4o-mini" />
@@ -235,24 +345,7 @@ async function reset(): Promise<void> {
               <n-input v-model:value="settings.tts.baseUrl" placeholder="https://api.openai.com/v1" />
             </n-form-item>
             <n-form-item label="API Key">
-              <div class="key-row">
-                <n-input
-                  v-model:value="ttsKeyInput"
-                  type="password"
-                  show-password-on="click"
-                  :placeholder="settings.tts.hasApiKey ? '已配置（输入新值可更换）' : 'sk-...'"
-                />
-                <n-button
-                  v-if="settings.tts.hasApiKey"
-                  size="small"
-                  type="error"
-                  quaternary
-                  @click="clearKey('tts')"
-                >
-                  清除
-                </n-button>
-              </div>
-              <span v-if="settings.tts.hasApiKey" class="key-status">已配置，密钥不回显。</span>
+              <ApiKeySetting section="tts" />
             </n-form-item>
             <n-form-item label="模型">
               <n-input v-model:value="settings.tts.model" placeholder="tts-1" />
@@ -287,24 +380,7 @@ async function reset(): Promise<void> {
               <n-input v-model:value="settings.stt.baseUrl" placeholder="https://api.openai.com/v1" />
             </n-form-item>
             <n-form-item label="API Key">
-              <div class="key-row">
-                <n-input
-                  v-model:value="sttKeyInput"
-                  type="password"
-                  show-password-on="click"
-                  :placeholder="settings.stt.hasApiKey ? '已配置（输入新值可更换）' : 'sk-...'"
-                />
-                <n-button
-                  v-if="settings.stt.hasApiKey"
-                  size="small"
-                  type="error"
-                  quaternary
-                  @click="clearKey('stt')"
-                >
-                  清除
-                </n-button>
-              </div>
-              <span v-if="settings.stt.hasApiKey" class="key-status">已配置，密钥不回显。</span>
+              <ApiKeySetting section="stt" />
             </n-form-item>
             <n-form-item label="模型">
               <n-input v-model:value="settings.stt.model" placeholder="whisper-1" />
@@ -361,11 +437,11 @@ async function reset(): Promise<void> {
       <n-card title="Live2D 形象" size="small">
         <n-form label-placement="top" :show-feedback="false">
           <n-form-item label="启用 Live2D">
-            <n-switch v-model:value="settings.live2d.enabled" />
+            <n-switch v-model:value="live2dDraft.enabled" />
           </n-form-item>
           <n-form-item label="模型">
             <n-select
-              :value="settings.live2d.modelUrl"
+              :value="live2dDraft.modelUrl"
               :options="modelOptions"
               :loading="!live2d.modelsLoaded"
               placeholder="选择 Live2D 模型"
@@ -385,33 +461,69 @@ async function reset(): Promise<void> {
               <span class="dropzone-sub">将自动复制到用户目录并启用（*.model3.json）</span>
             </div>
           </n-form-item>
-          <n-alert v-if="live2dTip" :type="live2dTip.startsWith('已导入') ? 'success' : 'warning'" size="small">
+          <n-alert v-if="live2dTip" :type="live2dTip.startsWith('已') ? 'success' : 'warning'" size="small">
             {{ live2dTip }}
           </n-alert>
           <n-form-item label="模型地址">
             <n-input
-              v-model:value="settings.live2d.modelUrl"
+              v-model:value="live2dDraft.modelUrl"
               placeholder="live2d://natori/Natori.model3.json"
             />
           </n-form-item>
+          <div class="live2d-identify">
+            <span class="identify-hint">
+              按当前所选模型重新解析并推断每个表情的语义
+              <template v-if="!settings.llm.hasApiKey">
+                <br />「用 AI 重新识别」需先在大模型配置中填写 API Key
+              </template>
+            </span>
+            <div class="live2d-identify-btns">
+              <n-button size="small" :loading="reidentifying" @click="onReidentifyExpressions()">
+                重新识别模型表情
+              </n-button>
+              <n-button
+                size="small"
+                type="primary"
+                :loading="aiIdentifying"
+                :disabled="!settings.llm.hasApiKey"
+                @click="onAiAnalyze()"
+              >
+                用 AI 重新识别
+              </n-button>
+            </div>
+          </div>
           <template v-if="live2d.expressionIds.length > 0">
             <n-divider title-placement="left">表情映射（可选）</n-divider>
             <p class="emotion-map-hint">
-              自动识别模型的面部表情；若识别不准，可手动为每种情绪指定一个表情。当前生效：
-              <template v-for="s in EXPRESSION_SEMANTICS" :key="s">
-                <span class="emotion-map-chip">{{ EXPRESSION_SEMANTIC_LABELS[s] }}:{{ live2d.emotionToId[s] ?? '无' }}</span>
+              自动识别模型的面部表情（含强度等级）；若识别不准，可手动为每个档位指定一个表情。当前生效：
+              <template v-for="t in pendingTiers" :key="t.key">
+                <span class="emotion-map-chip">{{ tierEntryLabel(t) }}:{{ live2d.emotionToId[t.key] ?? '无' }}</span>
               </template>
             </p>
-            <n-form-item v-for="s in EXPRESSION_SEMANTICS" :key="s" :label="EXPRESSION_SEMANTIC_LABELS[s]">
+            <div v-for="t in pendingTiers" :key="t.key" class="tier-row">
+              <span class="tier-label" :title="tierEntryLabel(t)">{{ tierEntryLabel(t) }}</span>
               <n-select
-                :value="emotionOverrideValue(s)"
+                :value="emotionDisplayValue(t.key)"
                 :options="expressionOptions"
                 clearable
-                placeholder="自动（跟随推理）"
-                style="width: 100%"
-                @update:value="(v) => onEmotionOverrideChange(s, v)"
+                :placeholder="emotionPlaceholder(t.key)"
+                style="flex: 1 1 auto; min-width: 0"
+                @update:value="(v) => onEmotionOverrideChange(t.key, v)"
               />
-            </n-form-item>
+              <n-button size="small" quaternary type="error" class="tier-del" @click="removeTier(t.key)">
+                删除
+              </n-button>
+            </div>
+            <div class="tier-row tier-add-row">
+              <span class="tier-label">新增档位</span>
+              <n-select
+                v-model:value="addTierSemantic"
+                :options="addableSemantics"
+                placeholder="选择情绪语义"
+                style="flex: 1 1 auto; min-width: 0"
+              />
+              <n-button size="small" class="tier-del" @click="addTier(addTierSemantic)">添加</n-button>
+            </div>
           </template>
           <n-alert
             v-if="live2d.emotionInstruction"
@@ -422,6 +534,12 @@ async function reset(): Promise<void> {
           >
             {{ live2d.emotionInstruction }}
           </n-alert>
+          <div class="live2d-actions">
+            <n-button size="small" type="primary" :loading="settings.saving" @click="saveLive2d()">
+              保存设置
+            </n-button>
+            <n-button size="small" @click="resetLive2d()">恢复默认</n-button>
+          </div>
         </n-form>
       </n-card>
 
@@ -447,23 +565,6 @@ async function reset(): Promise<void> {
 </template>
 
 <style scoped>
-.key-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.key-row .n-input {
-  flex: 1;
-}
-
-.key-status {
-  font-size: 12px;
-  color: var(--text-3);
-  line-height: 1.4;
-}
-
 .emotion-map-hint {
   margin: 0 0 8px;
   font-size: 12px;
@@ -479,5 +580,59 @@ async function reset(): Promise<void> {
   background: var(--glass-4);
   color: var(--text-2);
   white-space: nowrap;
+}
+
+.tier-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tier-row:last-child {
+  margin-bottom: 0;
+}
+
+.tier-label {
+  flex: 0 0 72px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tier-del {
+  flex: 0 0 auto;
+}
+
+.tier-add-row {
+  margin-top: 4px;
+}
+
+.live2d-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.live2d-identify {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.identify-hint {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.live2d-identify-btns {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 </style>

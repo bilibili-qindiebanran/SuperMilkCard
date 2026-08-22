@@ -2,7 +2,10 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
   ApiKeySection,
+  ApiKeyTestRequest,
+  ApiKeyTestResult,
   ChatStreamRequest,
+  EmotionClassifyItem,
   LlmAborted,
   LlmChunk,
   LlmDone,
@@ -35,7 +38,9 @@ const api: RendererApi = {
     onChunk: (cb) => subscribe<LlmChunk>('llm:chunk', cb),
     onDone: (cb) => subscribe<LlmDone>('llm:done', cb),
     onError: (cb) => subscribe<LlmError>('llm:error', cb),
-    onAborted: (cb) => subscribe<LlmAborted>('llm:aborted', cb)
+    onAborted: (cb) => subscribe<LlmAborted>('llm:aborted', cb),
+    classify: (items: EmotionClassifyItem[]): Promise<Record<string, string>> =>
+      ipcRenderer.invoke('llm:classify', items)
   },
   settings: {
     get: (): Promise<PublicAppSettings> => ipcRenderer.invoke('settings:get'),
@@ -45,7 +50,9 @@ const api: RendererApi = {
     setKey: (section: ApiKeySection, apiKey: string): Promise<PublicAppSettings> =>
       ipcRenderer.invoke('settings:set-key', section, apiKey),
     clearKey: (section: ApiKeySection): Promise<PublicAppSettings> =>
-      ipcRenderer.invoke('settings:clear-key', section)
+      ipcRenderer.invoke('settings:clear-key', section),
+    testKey: (req: ApiKeyTestRequest): Promise<ApiKeyTestResult> =>
+      ipcRenderer.invoke('settings:test-key', req)
   },
   tts: {
     synthesize: (req: TtsSynthesizeRequest): Promise<TtsSynthesizeResult> =>

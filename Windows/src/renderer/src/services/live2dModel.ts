@@ -39,6 +39,125 @@ export const EXPRESSION_SEMANTIC_LABELS: Record<ExpressionSemantic, string> = {
   blush: '害羞'
 }
 
+/**
+ * 强度等级：>=1。1 = 基础档（不带后缀），2/3/… = 更强（键形式 语义@等级）。
+ * 例如 开心(happy) 是基础档，更开心(happy@2)、非常开心(happy@3)、超开心(happy@4)。
+ */
+export type ExpressionLevel = number
+
+/** 语义+等级 → 唯一 tierKey。基础档不带后缀，兼容旧覆盖键（如 'happy'）。 */
+export function tierKey(semantic: ExpressionSemantic, level: ExpressionLevel): string {
+  return level <= 1 ? semantic : `${semantic}@${level}`
+}
+
+/** tierKey → {semantic, level}；解析失败返回 null（非本语义集合或等级非法）。 */
+export function parseTierKey(
+  key: string
+): { semantic: ExpressionSemantic; level: ExpressionLevel } | null {
+  if (!key) return null
+  const idx = key.indexOf('@')
+  if (idx < 0) {
+    return EXPRESSION_SEMANTICS.includes(key as ExpressionSemantic)
+      ? { semantic: key as ExpressionSemantic, level: 1 }
+      : null
+  }
+  const sem = key.slice(0, idx) as ExpressionSemantic
+  const lvl = Number(key.slice(idx + 1))
+  if (!EXPRESSION_SEMANTICS.includes(sem)) return null
+  if (!Number.isInteger(lvl) || lvl < 2) return null
+  return { semantic: sem, level: lvl }
+}
+
+/** 等级中文前缀：2=更、3=非常、4=超… 用于生成「更开心 / 非常开心」这类标签。 */
+export const LEVEL_PREFIX: Record<number, string> = {
+  2: '更',
+  3: '非常',
+  4: '超'
+}
+
+/** 档位中文标签：如 开心 / 更开心 / 非常开心。 */
+export function tierLabel(semantic: ExpressionSemantic, level: ExpressionLevel): string {
+  const base = EXPRESSION_SEMANTIC_LABELS[semantic]
+  if (level <= 1) return base
+  return `${LEVEL_PREFIX[level] ?? `第${level}档`}${base}`
+}
+
+/** 表情名强度词 → 等级（命中匹配到的最大等级；无则默认 1）。 */
+const LEVEL_KEYWORDS: Array<{ level: ExpressionLevel; words: string[] }> = [
+  { level: 2, words: ['more', 'morer', 'quite', 'really', 'ver', '较', '很', '更', '特别', '越发'] },
+  { level: 3, words: ['very', 'super', 'extrem', 'highly', '太', '超', '极其', '特别特别', '狂', '暴', '极了'] },
+  { level: 4, words: ['max', 'ultimate', 'ultra', 'full', 'extreme', '最', '爆', '超超', '满', '极大'] }
+]
+
+/** 由表情名推断强度等级（取最大命中，默认 1）。 */
+function inferTierLevel(name?: string): ExpressionLevel {
+  if (!name) return 1
+  const key = normalizeName(name)
+  if (!key) return 1
+  let level: ExpressionLevel = 1
+  for (const { level: lvl, words } of LEVEL_KEYWORDS) {
+    if (lvl <= level) continue
+    if (words.some((w) => key.includes(normalizeName(w)))) level = lvl
+  }
+  return level
+}
+
+/** 一个档位条目：语义 + 等级 + 唯一键。 */
+export interface TierEntry {
+  semantic: ExpressionSemantic
+  level: ExpressionLevel
+  key: string
+}
+
+/**
+ * 合并自动识别档位与用户新增/移除的档位，得到当前生效的档位列表。
+ * - auto：模型自动识别出的档位；
+ * - additions：用户手动新增的 tierKey（如 happy@2）；
+ * - removals：用户手动隐藏的自动档位 tierKey。
+ * 结果按「语义顺序 + 等级升序」排序、去重（移除了的自动档位跳过；被新增又移除的也跳过）。
+ */
+export function mergeTiers(
+  auto: TierEntry[],
+  additions: string[],
+  removals: string[]
+): TierEntry[] {
+  const result: TierEntry[] = []
+  const seen = new Set<string>()
+  const push = (t: TierEntry): void => {
+    if (!seen.has(t.key)) {
+      seen.add(t.key)
+      result.push(t)
+    }
+  }
+  for (const t of auto ?? []) {
+    if (removals?.includes(t.key)) continue
+    push({ ...t })
+  }
+  for (const key of additions ?? []) {
+    if (removals?.includes(key)) continue
+    const parsed = parseTierKey(key)
+    if (parsed) push({ semantic: parsed.semantic, level: parsed.level, key: tierKey(parsed.semantic, parsed.level) })
+  }
+  const order = (s: ExpressionSemantic): number => EXPRESSION_SEMANTICS.indexOf(s)
+  result.sort((a, b) => order(a.semantic) - order(b.semantic) || a.level - b.level)
+  return result
+}
+
+/** 表情参数相对默认值的偏移幅度（绝对值平均；Multiply 取 |Value-1|），供同语义多档按强弱排序。 */
+function magnitudeScore(params: ExpressionParam[]): number {
+  if (!params || params.length === 0) return 0
+  let sum = 0
+  let count = 0
+  for (const p of params) {
+    const dev = p.Blend === 'Multiply' ? Math.abs(p.Value - 1) : Math.abs(p.Value)
+    if (dev > 0.01) {
+      sum += dev
+      count++
+    }
+  }
+  return count > 0 ? sum / count : 0
+}
+
 interface ExpressionParam {
   Id: string
   Value: number
@@ -258,14 +377,18 @@ function describeExpression(paramNames: Record<string, string>, params: Expressi
  */
 async function analyzeExpressions(
   modelUrl: string,
-  defs: Array<{ Name?: string; name?: string; File?: string }>
+  defs: Array<{ Name?: string; name?: string; File?: string }>,
+  perEmotion?: Record<string, string>
 ): Promise<{
-  emotionToId: Partial<Record<ExpressionSemantic, string>>
+  emotionToId: Record<string, string>
+  tiers: Array<{ semantic: ExpressionSemantic; level: ExpressionLevel; key: string }>
   semantics: Record<string, ExpressionSemantic>
+  tiersById: Record<string, { semantic: ExpressionSemantic; level: ExpressionLevel }>
   descriptions: Record<string, string>
 }> {
-  const emotionToId: Partial<Record<ExpressionSemantic, string>> = {}
+  let emotionToId: Record<string, string> = {}
   const semantics: Record<string, ExpressionSemantic> = {}
+  const tiersById: Record<string, { semantic: ExpressionSemantic; level: ExpressionLevel }> = {}
   const descriptions: Record<string, string> = {}
 
   // 模型 URL 的基目录：live2d://murasame/Murasame.model3.json -> live2d://murasame/
@@ -277,11 +400,19 @@ async function analyzeExpressions(
     base = `${u.protocol}//${u.host}${seg}/`
     modelFileName = u.pathname.split('/').pop() ?? ''
   } catch {
-    return { emotionToId, semantics, descriptions }
+    return { emotionToId, tiers: [], semantics, tiersById, descriptions }
   }
 
   const paramNames = await loadParamNames(base, modelFileName)
 
+  // 先逐表情收集：语义 + 名称强度等级 + 参数幅度，作为「同语义多档排序」的依据。
+  const raw: Array<{
+    id: string
+    semantic: ExpressionSemantic
+    nameLevel: ExpressionLevel
+    magnitude: number
+    desc: string
+  }> = []
   for (const d of defs) {
     const id = d.Name ?? d.name
     if (!id || !d.File) continue
@@ -291,17 +422,118 @@ async function analyzeExpressions(
       const json = (await res.json()) as { Parameters?: ExpressionParam[] }
       const params = json.Parameters ?? []
       const semantic = inferExpressionSemantic(params, id)
-      if (semantic) semantics[id] = semantic
-      const desc = describeExpression(paramNames, params)
-      if (desc) descriptions[id] = desc
-      // 已存在（手动覆盖或更早的更具体语义）时不覆盖
-      if (semantic && !emotionToId[semantic]) emotionToId[semantic] = id
+      if (!semantic) continue
+      raw.push({
+        id,
+        semantic,
+        nameLevel: inferTierLevel(id),
+        magnitude: magnitudeScore(params),
+        desc: describeExpression(paramNames, params)
+      })
     } catch {
       // 读取失败（如浏览器无 live2d://）时跳过该表达式，不阻断整体
       continue
     }
   }
-  return { emotionToId, semantics, descriptions }
+
+  // 按语义分组，组内先按名称强度（升序，弱→强），再按参数幅度（升序）排序，
+  // 从而把最弱的一档定为等级1，最强的档定为最高等级；同强度重复的表达式并入同一档（仅记首个 id）。
+  let tiers: Array<{ semantic: ExpressionSemantic; level: ExpressionLevel; key: string }> = []
+  for (const sem of EXPRESSION_SEMANTICS) {
+    const group = raw.filter((r) => r.semantic === sem)
+    if (group.length === 0) continue
+    group.sort((a, b) => a.nameLevel - b.nameLevel || a.magnitude - b.magnitude)
+    const seen = new Map<string, ExpressionLevel>()
+    let nextLevel = 1
+    for (const r of group) {
+      const bucket = `${r.nameLevel}|${Math.round(r.magnitude * 10)}`
+      let lvl = seen.get(bucket)
+      if (lvl === undefined) {
+        lvl = nextLevel++
+        seen.set(bucket, lvl)
+      }
+      const key = tierKey(sem, lvl)
+      if (!emotionToId[key]) emotionToId[key] = r.id
+      semantics[r.id] = sem
+      tiersById[r.id] = { semantic: sem, level: lvl }
+      if (r.desc) descriptions[r.id] = r.desc
+    }
+    for (const lvl of seen.values()) {
+      tiers.push({ semantic: sem, level: lvl, key: tierKey(sem, lvl) })
+    }
+  }
+
+  // 应用「LLM 预填 / 人工修正」的表达式 → tierKey 映射：若某表达式被指定了别的语义或等级，以它为准覆盖启发式结果。
+  if (perEmotion) {
+    let changed = false
+    for (const [id, tk] of Object.entries(perEmotion)) {
+      const parsed = parseTierKey(tk)
+      if (!parsed) continue
+      const cur = tiersById[id]
+      if (!cur) continue
+      if (cur.semantic === parsed.semantic && cur.level === parsed.level) continue
+      semantics[id] = parsed.semantic
+      tiersById[id] = { semantic: parsed.semantic, level: parsed.level }
+      changed = true
+    }
+    if (changed) {
+      // 依据修正后的 tiersById 重建 emotionToId 与 tiers（同 tierKey 只保留首个 id）
+      emotionToId = {}
+      const tierMap = new Map<string, { semantic: ExpressionSemantic; level: ExpressionLevel }>()
+      for (const [id, t] of Object.entries(tiersById)) {
+        const key = tierKey(t.semantic, t.level)
+        if (!emotionToId[key]) emotionToId[key] = id
+        tierMap.set(key, t)
+      }
+      const order = new Map(EXPRESSION_SEMANTICS.map((s, i) => [s, i]))
+      tiers = [...tierMap.entries()]
+        .map(([key, t]) => ({ semantic: t.semantic, level: t.level, key }))
+        .sort(
+          (a, b) => (order.get(a.semantic) ?? 99) - (order.get(b.semantic) ?? 99) || a.level - b.level
+        )
+    }
+  }
+
+  return { emotionToId, tiers, semantics, tiersById, descriptions }
+}
+
+/** 独立重新识别模型表情：读取模型3.json 的 Expressions 定义后逐表情分析。
+ *  复用加载模型时的同一套识别逻辑（analyzeExpressions），供设置页「重新识别模型表情」使用。
+ *  仅为预览/刷新映射，不写入任何设置。 */
+export async function reidentifyModelExpressions(
+  modelUrl: string,
+  perEmotion?: Record<string, string>
+): Promise<{
+  expressionIds: string[]
+  autoEmotionToId: Record<string, string>
+  tiers: Array<{ semantic: ExpressionSemantic; level: ExpressionLevel; key: string }>
+  semantics: Record<string, ExpressionSemantic>
+  tiersById: Record<string, { semantic: ExpressionSemantic; level: ExpressionLevel }>
+  descriptions: Record<string, string>
+}> {
+  const res = await fetch(modelUrl)
+  if (!res.ok) throw new Error(`无法读取模型配置：${modelUrl}`)
+  const json = (await res.json()) as {
+    FileReferences?: { Expressions?: Array<{ Name?: string; File?: string }> }
+  }
+  const defs: Array<{ Name?: string; name?: string; File?: string }> =
+    json.FileReferences?.Expressions ?? []
+  const { emotionToId, tiers, semantics, tiersById, descriptions } = await analyzeExpressions(
+    modelUrl,
+    defs,
+    perEmotion
+  )
+  const expressionIds = defs
+    .map((d) => d.Name ?? d.name)
+    .filter((x): x is string => typeof x === 'string' && x.length > 0)
+  return {
+    expressionIds,
+    autoEmotionToId: emotionToId,
+    tiers,
+    semantics,
+    tiersById,
+    descriptions
+  }
 }
 
 /** 情绪 → 表情语义（含中英文归一化） */
@@ -342,15 +574,54 @@ const EMOTION_TO_SEMANTIC: Record<string, ExpressionSemantic> = {
   正常: 'neutral'
 }
 
+/** 强度情绪词 → tierKey（优先于基础 EMOTION_TO_SEMANTIC）。 */
+const EMOTION_TO_TIER: Record<string, string> = {
+  更开心: 'happy@2',
+  非常开心: 'happy@3',
+  超开心: 'happy@4',
+  大喜: 'happy@2',
+  狂喜: 'happy@4',
+  开心极了: 'happy@3',
+  更高兴: 'happy@2',
+  非常高兴: 'happy@3',
+  更生气: 'angry@2',
+  非常生气: 'angry@3',
+  超生气: 'angry@4',
+  愤怒: 'angry@2',
+  大怒: 'angry@2',
+  狂怒: 'angry@4',
+  暴怒: 'angry@4',
+  更难过: 'sad@2',
+  非常难过: 'sad@3',
+  大哭: 'sad@2',
+  痛哭: 'sad@4',
+  悲痛: 'sad@2',
+  更惊讶: 'surprised@2',
+  非常惊讶: 'surprised@3',
+  更害羞: 'blush@2',
+  非常害羞: 'blush@3'
+}
+
 /** 动作 → 动作组（内置模型仅有 Idle / TapBody，统一落到 TapBody） */
 export function mapActionToMotion(_action: string): string {
   return 'TapBody'
 }
 
-/** 情绪 → 表情语义（无映射返回 null） */
-function emotionToSemantic(emotion: string): ExpressionSemantic | null {
+/**
+ * 把情绪文本/LLM 标签值解析为 tierKey。
+ * 规则：1) 已带等级（如 happy@2）直接命中；2) 查强度词表（更开心→happy@2）；
+ *       3) 回退到基础语义映射（开心→happy）；4) 全不中返回 null。
+ */
+function resolveTierKey(emotion: string): string | null {
   const key = emotion.trim().toLowerCase()
-  return EMOTION_TO_SEMANTIC[key] ?? null
+  if (!key) return null
+  const parsed = parseTierKey(key)
+  if (parsed) return tierKey(parsed.semantic, parsed.level)
+  const tier = EMOTION_TO_TIER[key]
+  if (tier) return tier
+  const semantic = EMOTION_TO_SEMANTIC[key]
+  if (semantic) return tierKey(semantic, 1)
+  return null
 }
 
 /**
@@ -370,12 +641,16 @@ export class Live2DController {
   private model: Live2DModel | null = null
   /** 当前模型实际支持的表达式 id 列表（按声明顺序） */
   private expressionIds: string[] = []
-  /** 按语义自动识别的「语义 → 表达式 id」映射（不含手动覆盖，随模型加载重建） */
-  private autoEmotionToId: Partial<Record<ExpressionSemantic, string>> = {}
-  /** 用户手动覆盖的「语义 → 表达式 id」映射（只增不减，随覆盖操作更新） */
+  /** 按语义+等级自动识别的「tierKey → 表达式 id」映射（不含手动覆盖，随模型加载重建） */
+  private autoEmotionToId: Record<string, string> = {}
+  /** 用户手动覆盖的「tierKey → 表达式 id」映射（随覆盖操作整体替换，含清除） */
   private overrideEmotionToId: Record<string, string> = {}
-  /** 每个表达式推断出的语义（设置页下拉标注用） */
+  /** 当前模型推断出的档位列表（语义 + 等级 + tierKey，设置页/指令用） */
+  private tiers: Array<{ semantic: ExpressionSemantic; level: ExpressionLevel; key: string }> = []
+  /** 每个表达式推断出的基础语义（设置页下拉标注用） */
   private expressionSemantics: Record<string, ExpressionSemantic> = {}
+  /** 每个表达式推断出的档位（语义 + 等级，设置页下拉标注用） */
+  private expressionTiers: Record<string, { semantic: ExpressionSemantic; level: ExpressionLevel }> = {}
   /** 每个表达式的作者内置参数描述（设置页下拉标注用） */
   private expressionDescriptions: Record<string, string> = {}
 
@@ -405,7 +680,11 @@ export class Live2DController {
     })
   }
 
-  async loadModel(url: string, overrides?: Record<string, string>): Promise<void> {
+  async loadModel(
+    url: string,
+    overrides?: Record<string, string>,
+    perEmotion?: Record<string, string>
+  ): Promise<void> {
     if (!this.app) throw new Error('Live2D 舞台尚未挂载')
     this.clearModel()
     const model = await Live2DModel.from(url, { autoInteract: false, autoUpdate: true })
@@ -420,11 +699,17 @@ export class Live2DController {
     this.expressionIds = defs
       .map((d) => d.Name ?? d.name)
       .filter((x): x is string => typeof x === 'string' && x.length > 0)
-    // 读取每个表情文件内容：构建「语义 → 表达式 id」+ 每个表情的语义与作者内置参数描述
-    const { emotionToId, semantics, descriptions } = await analyzeExpressions(url, defs)
+    // 读取每个表情文件内容：构建「tierKey → 表达式 id」+ 每个表情的档位/语义与作者内置参数描述
+    const { emotionToId, tiers, semantics, tiersById, descriptions } = await analyzeExpressions(
+      url,
+      defs,
+      perEmotion
+    )
     this.autoEmotionToId = emotionToId
     this.overrideEmotionToId = { ...(overrides ?? {}) }
+    this.tiers = tiers
     this.expressionSemantics = semantics
+    this.expressionTiers = tiersById
     this.expressionDescriptions = descriptions
     // 每次加载新模型后重置用户的缩放/平移
     this.zoomLevel = 1
@@ -438,14 +723,31 @@ export class Live2DController {
     return [...this.expressionIds]
   }
 
-  /** 当前模型的「语义 → 表达式 id」映射（自动推理 + 手动覆盖合并，设置页预览用） */
-  getEmotionToId(): Partial<Record<ExpressionSemantic, string>> {
+  /** 当前模型的「tierKey → 表达式 id」映射（自动推理 + 手动覆盖合并，设置页预览用） */
+  getEmotionToId(): Record<string, string> {
     return { ...this.autoEmotionToId, ...this.overrideEmotionToId }
+  }
+
+  /** 当前模型自动推理的「tierKey → 表达式 id」映射（不含手动覆盖，设置页下拉回退用） */
+  getAutoEmotionToId(): Record<string, string> {
+    return { ...this.autoEmotionToId }
+  }
+
+  /** 当前模型推断出的档位列表（设置页/指令用） */
+  getTiers(): Array<{ semantic: ExpressionSemantic; level: ExpressionLevel; key: string }> {
+    return this.tiers.map((t) => ({ ...t }))
   }
 
   /** 每个表达式推断出的语义（设置页下拉标注用） */
   getExpressionSemantics(): Record<string, ExpressionSemantic> {
     return { ...this.expressionSemantics }
+  }
+
+  /** 每个表达式推断出的档位（设置页下拉标注用） */
+  getExpressionTiers(): Record<string, { semantic: ExpressionSemantic; level: ExpressionLevel }> {
+    return Object.fromEntries(
+      Object.entries(this.expressionTiers).map(([k, v]) => [k, { ...v }])
+    )
   }
 
   /** 每个表达式的作者内置参数描述（设置页下拉标注用） */
@@ -537,10 +839,10 @@ export class Live2DController {
 
   async setEmotion(emotion: string): Promise<void> {
     if (!this.model) return
-    // 情绪文本 → 语义 → 该模型实际表达式 id（来自表情文件特征识别）
-    const semantic = emotionToSemantic(emotion)
-    if (!semantic) return
-    const id = this.overrideEmotionToId[semantic] ?? this.autoEmotionToId[semantic]
+    // 情绪文本/标签 → tierKey → 该模型实际表达式 id（来自表情文件特征识别）
+    const key = resolveTierKey(emotion)
+    if (!key) return
+    const id = this.overrideEmotionToId[key] ?? this.autoEmotionToId[key]
     if (id) await this.setExpression(id)
   }
 
@@ -582,7 +884,9 @@ export class Live2DController {
     this.expressionIds = []
     this.autoEmotionToId = {}
     this.overrideEmotionToId = {}
+    this.tiers = []
     this.expressionSemantics = {}
+    this.expressionTiers = {}
     this.expressionDescriptions = {}
   }
 

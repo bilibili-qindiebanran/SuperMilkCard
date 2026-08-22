@@ -69,8 +69,14 @@ export interface Live2dConfig {
   enabled: boolean
   /** 模型地址（默认内置 Natori 示例模型，可改为本地/自定义 URL） */
   modelUrl: string
-  /** 手动表情映射覆盖：key = 模型名（目录名），value = 语义名 → 表达式 id */
+  /** 手动表情映射覆盖：key = 模型名（目录名），value = tierKey（如 happy / happy@2）→ 表达式 id */
   emotionOverrides: Record<string, Record<string, string>>
+  /** 手动新增的表情档位：key = 模型名，value = tierKey 列表（如 ['happy@2']） */
+  tierAdditions: Record<string, string[]>
+  /** 手动隐藏的自动识别档位：key = 模型名，value = 被移除的 tierKey 列表 */
+  tierRemovals: Record<string, string[]>
+  /** LLM/AI 预填或人工修正后的「表达式 id → tierKey」：key = 模型名（目录名），value = 表达式 id → 语义@等级 */
+  expressionEmotions: Record<string, Record<string, string>>
 }
 
 /** Live2D 可用模型信息 */
@@ -108,6 +114,8 @@ export interface PublicLlmConfig {
   maxTokens: number
   /** 是否已配置 API Key（仅供“已配置/未配置”展示，不回传真实密钥） */
   hasApiKey: boolean
+  /** 脱敏后的密钥展示串（前4…后4）；未配置时为 '' */
+  maskedKey: string
 }
 
 export interface PublicTtsConfig {
@@ -118,6 +126,7 @@ export interface PublicTtsConfig {
   autoSpeak: boolean
   baseUrl: string
   hasApiKey: boolean
+  maskedKey: string
 }
 
 export interface PublicSttConfig {
@@ -126,6 +135,7 @@ export interface PublicSttConfig {
   language: string
   baseUrl: string
   hasApiKey: boolean
+  maskedKey: string
 }
 
 export interface PublicAppSettings {
@@ -158,7 +168,8 @@ export function toPublicSettings(s: AppSettings): PublicAppSettings {
       temperature: s.llm.temperature,
       maxContextTokens: s.llm.maxContextTokens,
       maxTokens: s.llm.maxTokens,
-      hasApiKey: s.llm.apiKey.trim() !== ''
+      hasApiKey: s.llm.apiKey.trim() !== '',
+      maskedKey: maskKey(s.llm.apiKey)
     },
     personas: s.personas,
     activePersonaId: s.activePersonaId,
@@ -169,24 +180,44 @@ export function toPublicSettings(s: AppSettings): PublicAppSettings {
       speed: s.tts.speed,
       autoSpeak: s.tts.autoSpeak,
       baseUrl: s.tts.baseUrl,
-      hasApiKey: s.tts.apiKey.trim() !== ''
+      hasApiKey: s.tts.apiKey.trim() !== '',
+      maskedKey: maskKey(s.tts.apiKey)
     },
     stt: {
       engine: s.stt.engine,
       model: s.stt.model,
       language: s.stt.language,
       baseUrl: s.stt.baseUrl,
-      hasApiKey: s.stt.apiKey.trim() !== ''
+      hasApiKey: s.stt.apiKey.trim() !== '',
+      maskedKey: maskKey(s.stt.apiKey)
     },
     live2d: s.live2d,
     theme: s.theme
   }
 }
 
+/** 对 API Key 脱敏：只暴露前4与后4；过短（≤8）则全遮蔽 */
+export function maskKey(key: string): string {
+  const v = (key || '').trim()
+  if (!v) return ''
+  if (v.length <= 8) return '*'.repeat(v.length)
+  return `${v.slice(0, 4)}\u2026${v.slice(-4)}`
+}
+
 /** 单次流式对话请求（渲染进程 → 主进程，仅携带必要数据，配置由主进程读取） */
 export interface ChatStreamRequest {
   chatId: string
   messages: Array<{ role: Role; content: string }>
+}
+
+/** 单个表达式的情绪标注输入（渲染进程 → 主进程，持久化/LLM 预填用） */
+export interface EmotionClassifyItem {
+  /** 表达式 id（如 exp_02） */
+  id: string
+  /** 表达式对外名称（通常同 id） */
+  name: string
+  /** 作者内置参数显示名（cdi3，如 目笑顔+目開閉），供 LLM 判断语义 */
+  description: string
 }
 
 /** 流式事件负载 */
@@ -226,6 +257,20 @@ export interface SttTranscribeResult {
   text: string
 }
 
+/** 测试某部分 API Key 是否可用（渲染进程 → 主进程，密钥与 baseUrl 可回退到配置） */
+export interface ApiKeyTestRequest {
+  section: ApiKeySection
+  /** 弹窗中用户新输入的密钥；为空时用主进程当前配置 */
+  apiKey: string
+  /** 弹窗中当前生效的 Base URL；为空时回退到主进程配置 */
+  baseUrl: string
+}
+
+export interface ApiKeyTestResult {
+  ok: boolean
+  message: string
+}
+
 /** 预加载脚本暴露给渲染进程的 API 形状 */
 export interface RendererApi {
   llm: {
@@ -235,6 +280,8 @@ export interface RendererApi {
     onDone(cb: (e: LlmDone) => void): () => void
     onError(cb: (e: LlmError) => void): () => void
     onAborted(cb: (e: LlmAborted) => void): () => void
+    /** LLM 预填表情情绪标注：返回 表达式 id → tierKey（如 happy / happy@2） */
+    classify(items: EmotionClassifyItem[]): Promise<Record<string, string>>
   }
   settings: {
     get(): Promise<PublicAppSettings>
@@ -244,6 +291,8 @@ export interface RendererApi {
     setKey(section: ApiKeySection, apiKey: string): Promise<PublicAppSettings>
     /** 清除某部分的 API Key */
     clearKey(section: ApiKeySection): Promise<PublicAppSettings>
+    /** 测试 API Key 是否可用 */
+    testKey(req: ApiKeyTestRequest): Promise<ApiKeyTestResult>
   }
   tts: {
     synthesize(req: TtsSynthesizeRequest): Promise<TtsSynthesizeResult>
@@ -273,7 +322,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
       id: 'genki',
       name: '小奶卡',
       avatar: '🥛',
-      systemPrompt: '你是一个名叫"小奶卡"的元气虚拟助手。语气亲切、活泼、带一点俏皮，回复尽量简洁，多用表情和语气词。',
+      systemPrompt:
+        '你是一个名叫"小奶卡"的元气虚拟助手。语气亲切、活泼、带一点俏皮，回复尽量简洁，多用表情和语气词。',
       defaultExpression: 'exp_04'
     },
     {
@@ -287,7 +337,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
       id: 'tsundere',
       name: '毒舌吐槽',
       avatar: '🌶️',
-      systemPrompt: '你是一个毒舌又傲娇的吐槽角色。嘴上不饶人但内心关心对方，爱开玩笑和调侃，偶尔翻白眼。',
+      systemPrompt:
+        '你是一个毒舌又傲娇的吐槽角色。嘴上不饶人但内心关心对方，爱开玩笑和调侃，偶尔翻白眼。',
       defaultExpression: 'exp_03'
     }
   ],
@@ -311,7 +362,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   live2d: {
     enabled: true,
     modelUrl: 'live2d://mao/Mao.model3.json',
-    emotionOverrides: {}
+    emotionOverrides: {},
+    tierAdditions: {},
+    tierRemovals: {},
+    expressionEmotions: {}
   },
   theme: 'light'
 }
