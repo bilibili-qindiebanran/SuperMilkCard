@@ -38,6 +38,7 @@
 #include "lcd_ui.h"
 #include "touch.h"
 #include "touch_test_ui.h"
+#include "ui/app_state.h"
 #include "ui_app.h"
 #include "uart_justfloat.h"
 
@@ -175,6 +176,10 @@ static void justfloat_output_task(void *arg)
         };
         /* JustFloat 数据走 UART0（GPIO43/44 → VOFA+），日志仍走 USB */
         uart_justfloat_send(data, 7);
+
+        /* 发布到 app_state（UI 读取） */
+        app_state_publish_power(st.charging, st.charge_full, st.light_load);
+        app_state_publish_audio(mic_rms_db, mic_peak_db);
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }

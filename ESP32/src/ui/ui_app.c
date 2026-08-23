@@ -2,8 +2,10 @@
  * @file ui_app.c
  * @brief LVGL 产品 UI 实现
  *
- * 阶段3：接入输入端口（ui_port_input：触摸 POINTER + 实体键 KEYPAD）
- * 后续阶段继续扩展：状态 → 页面
+ * 阶段5：产品页面 + 底部导航
+ *   - 主题初始化（深色 + 官方 CJK 字体）
+ *   - 创建 4 页面 + 底部导航
+ *   - 启动心跳/主循环任务
  */
 
 #include "ui_app.h"
@@ -18,8 +20,10 @@
 
 #include "lcd_ui.h"
 #include "touch.h"
+#include "ui_pages.h"
 #include "ui_port_display.h"
 #include "ui_port_input.h"
+#include "ui_theme.h"
 
 static const char *TAG = "ui_app";
 
@@ -48,17 +52,6 @@ static void ui_loop_task(void *arg)
     }
 }
 
-/* 测试按钮点击回调：验证触摸 → LVGL 事件链路 */
-static void ui_test_btn_cb(lv_event_t *e)
-{
-    static int tap = 0;
-    lv_obj_t *lbl = (lv_obj_t *)lv_event_get_user_data(e);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "点击 %d 次", ++tap);
-    lv_label_set_text(lbl, buf);
-    ESP_LOGI(TAG, "button clicked %d times", tap);
-}
-
 esp_err_t ui_app_start(void)
 {
     ESP_LOGI(TAG, "LVGL %d.%d.%d starting...",
@@ -75,38 +68,32 @@ esp_err_t ui_app_start(void)
         return ESP_ERR_NO_MEM;
     }
 
-    /* 阶段3：接入输入端口（触摸 POINTER + 实体键 KEYPAD） */
+    /* 接入输入端口（触摸 POINTER + 实体键 KEYPAD） */
     esp_err_t in_err = ui_port_input_create();
     if (in_err != ESP_OK)
     {
         ESP_LOGE(TAG, "ui_port_input_create failed: %s", esp_err_to_name(in_err));
     }
 
-    /* 同步触摸旋转与显示旋转：LVGL 显示 90° 横屏，触摸坐标也必须 90°，
-     * 否则触摸位置与屏幕显示错位 */
+    /* 同步触摸旋转与显示旋转 */
     touch_set_rotation(UI_DISPLAY_ROTATION_DEG);
 
-    /* 阶段3：测试按钮（点击计数，验证触摸 → LVGL 事件链路） */
-    lv_obj_t *btn = lv_button_create(lv_scr_act());
-    lv_obj_set_size(btn, 160, 60);
-    lv_obj_center(btn);
+    /* 阶段5：初始化主题（深色背景 + 官方 CJK 字体） */
+    ui_theme_init();
 
-    lv_obj_t *btn_label = lv_label_create(btn);
-    lv_label_set_text(btn_label, "tap");
-    lv_obj_center(btn_label);
-    lv_obj_add_event_cb(btn, ui_test_btn_cb, LV_EVENT_CLICKED, btn_label);
+    /* 阶段5：创建页面 + 底部导航 */
+    ui_pages_create(lv_scr_act());
 
     /* 调试：打印旋转后分辨率确认方向 */
-    ESP_LOGI(TAG, "disp after rot: hor=%d ver=%d rot=%d",
+    ESP_LOGI(TAG, "disp: hor=%d ver=%d rot=%d",
              lv_display_get_horizontal_resolution(disp),
              lv_display_get_vertical_resolution(disp),
              (int)lv_display_get_rotation(disp));
 
-    /* 启动 LVGL 任务：心跳（CPU0）+ 主循环（CPU1，优先级 3 低于外设任务，
-     * 避免长时间占用 CPU 饿死 IDLE/其他任务触发看门狗） */
+    /* 启动 LVGL 任务：心跳（CPU0）+ 主循环（CPU1，优先级 3） */
     xTaskCreatePinnedToCore(ui_tick_task, "ui_tick", 2048, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(ui_loop_task, "ui_loop", 8192, NULL, 3, NULL, 1);
 
-    ESP_LOGI(TAG, "ui_app started (stage 3: input port)");
+    ESP_LOGI(TAG, "ui_app started (stage 5: pages + nav)");
     return ESP_OK;
 }
