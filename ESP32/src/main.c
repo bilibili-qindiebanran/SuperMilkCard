@@ -38,6 +38,7 @@
 #include "lcd_ui.h"
 #include "touch.h"
 #include "touch_test_ui.h"
+#include "ui_app.h"
 #include "uart_justfloat.h"
 
 static const char *TAG = "main";
@@ -333,7 +334,9 @@ void app_main(void)
     xTaskCreatePinnedToCore(justfloat_output_task, "justfloat_out", 4096, NULL, 6, NULL, 1);
     if (lcd_ok)
     {
-        touch_test_ui_start(); /* 触摸测试 UI（替代原 lcd_demo） */
+        /* 阶段2：临时切到 LVGL 产品 UI（验证显示端口），
+         * 触摸测试 UI 保留为诊断工具（touch_test_ui.h 仍可手动调用） */
+        ui_app_start();
     }
 
     /* 主任务不再做事，挂起 */

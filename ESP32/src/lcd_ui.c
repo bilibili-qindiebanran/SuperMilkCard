@@ -146,17 +146,17 @@ esp_err_t lcd_ui_init(void)
     }
 
     /* 6. 全帧缓冲（优先 PSRAM，回退内部 RAM） */
-    s_fb = heap_caps_malloc(LCD_UI_W * LCD_UI_H * 2, MALLOC_CAP_SPIRAM);
+    s_fb = heap_caps_malloc(LCD_UI_PHYS_W * LCD_UI_PHYS_H * 2, MALLOC_CAP_SPIRAM);
     if (s_fb == NULL)
     {
-        s_fb = heap_caps_malloc(LCD_UI_W * LCD_UI_H * 2, MALLOC_CAP_8BIT);
+        s_fb = heap_caps_malloc(LCD_UI_PHYS_W * LCD_UI_PHYS_H * 2, MALLOC_CAP_8BIT);
     }
     if (s_fb == NULL)
     {
         ESP_LOGE(TAG, "no framebuffer available");
         return ESP_ERR_NO_MEM;
     }
-    ESP_LOGI(TAG, "framebuffer: %d bytes", LCD_UI_W * LCD_UI_H * 2);
+    ESP_LOGI(TAG, "framebuffer: %d bytes", LCD_UI_PHYS_W * LCD_UI_PHYS_H * 2);
 
     /* 7. 开背光 */
     aw9364_backlight_on();
@@ -170,7 +170,7 @@ esp_err_t lcd_ui_init(void)
 /* ================================================================== */
 static inline uint16_t *fb_pixel(int x, int y)
 {
-    return &s_fb[y * LCD_UI_W + x];
+    return &s_fb[y * LCD_UI_PHYS_W + x];
 }
 
 esp_err_t lcd_ui_fill_rect(int x0, int y0, int x1, int y1, uint16_t color)
@@ -181,8 +181,8 @@ esp_err_t lcd_ui_fill_rect(int x0, int y0, int x1, int y1, uint16_t color)
     }
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
-    if (x1 > LCD_UI_W) x1 = LCD_UI_W;
-    if (y1 > LCD_UI_H) y1 = LCD_UI_H;
+    if (x1 > LCD_UI_PHYS_W) x1 = LCD_UI_PHYS_W;
+    if (y1 > LCD_UI_PHYS_H) y1 = LCD_UI_PHYS_H;
     uint16_t c = lcd_swap16(color);
     for (int y = y0; y < y1; y++)
     {
@@ -197,7 +197,7 @@ esp_err_t lcd_ui_fill_rect(int x0, int y0, int x1, int y1, uint16_t color)
 
 esp_err_t lcd_ui_fill_screen(uint16_t color)
 {
-    return lcd_ui_fill_rect(0, 0, LCD_UI_W, LCD_UI_H, color);
+    return lcd_ui_fill_rect(0, 0, LCD_UI_PHYS_W, LCD_UI_PHYS_H, color);
 }
 
 esp_err_t lcd_ui_draw_string(int x, int y, const char *s, uint16_t fg, uint16_t bg)
@@ -223,7 +223,7 @@ esp_err_t lcd_ui_draw_string(int x, int y, const char *s, uint16_t fg, uint16_t 
             {
                 int px = cx + col;
                 int py = y + row;
-                if (px >= 0 && px < LCD_UI_W && py >= 0 && py < LCD_UI_H)
+                if (px >= 0 && px < LCD_UI_PHYS_W && py >= 0 && py < LCD_UI_PHYS_H)
                 {
                     *fb_pixel(px, py) = ((glyph[row] >> (6 - col)) & 1) ? f : b;
                 }
@@ -243,7 +243,7 @@ esp_err_t lcd_ui_draw_pixel(int x, int y, uint16_t color)
     {
         return ESP_ERR_INVALID_STATE;
     }
-    if (x >= 0 && x < LCD_UI_W && y >= 0 && y < LCD_UI_H)
+    if (x >= 0 && x < LCD_UI_PHYS_W && y >= 0 && y < LCD_UI_PHYS_H)
     {
         *fb_pixel(x, y) = lcd_swap16(color);
     }
@@ -331,7 +331,7 @@ esp_err_t lcd_ui_draw_crosshair(int x, int y, int r, uint16_t color)
 /* 整屏刷新：按行分块经内部 RAM 发送（规避 PSRAM DMA underflow）      */
 /* ================================================================== */
 #define FB_CHUNK_ROWS 64 /* 每块 64 行 = 320*64*2 = 40KB，480/64=8 次事务 */
-static uint16_t s_fb_chunk[LCD_UI_W * FB_CHUNK_ROWS] __attribute__((aligned(4)));
+static uint16_t s_fb_chunk[LCD_UI_PHYS_W * FB_CHUNK_ROWS] __attribute__((aligned(4)));
 
 esp_err_t lcd_ui_flush(void)
 {
@@ -346,15 +346,69 @@ esp_err_t lcd_ui_flush(void)
      * esp_lcd_panel_draw_bitmap() 的颜色数据通过 DMA 异步发送；
      * s_fb_chunk 必须在传输结束后才可覆写。以空参数事务作为
      * ESP-IDF 提供的队列同步屏障，等待当前分块完成。 */
-    for (int y = 0; y < LCD_UI_H; y += FB_CHUNK_ROWS)
+    for (int y = 0; y < LCD_UI_PHYS_H; y += FB_CHUNK_ROWS)
     {
-        int rows = (LCD_UI_H - y) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (LCD_UI_H - y);
-        memcpy(s_fb_chunk, &s_fb[y * LCD_UI_W], rows * LCD_UI_W * 2);
-        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, y, LCD_UI_W, y + rows, s_fb_chunk);
+        int rows = (LCD_UI_PHYS_H - y) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (LCD_UI_PHYS_H - y);
+        memcpy(s_fb_chunk, &s_fb[y * LCD_UI_PHYS_W], rows * LCD_UI_PHYS_W * 2);
+        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, y, LCD_UI_PHYS_W, y + rows, s_fb_chunk);
         if (err != ESP_OK)
         {
             return err;
         }
+        err = esp_lcd_panel_io_tx_param(s_io, -1, NULL, 0);
+        if (err != ESP_OK)
+        {
+            return err;
+        }
+    }
+    return ESP_OK;
+}
+
+/* ================================================================== */
+/* 局部刷新：LVGL 脏区域 → 4 像素对齐 → 分块 DMA 发送                */
+/* ================================================================== */
+esp_err_t lcd_ui_flush_area(int x0, int y0, int x1, int y1, const void *data)
+{
+    if (s_panel == NULL || data == NULL)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* 边界钳制 */
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > LCD_UI_PHYS_W) x1 = LCD_UI_PHYS_W;
+    if (y1 > LCD_UI_PHYS_H) y1 = LCD_UI_PHYS_H;
+    if (x0 >= x1 || y0 >= y1)
+    {
+        return ESP_OK;
+    }
+
+    /* ST77926 QSPI 要求 X 起点/宽度 4 像素对齐：向左侧扩展起点、
+     * 向右侧扩展终点。调用方（LVGL flush_cb）提供的 data 是 x0 起始
+     * 的连续行数据，扩展后需把起始偏移加上。 */
+    int dx0 = x0 & ~3;              /* 向下对齐到 4 */
+    int dx1 = (x1 + 3) & ~3;        /* 向上对齐到 4 */
+    int offset_px = x0 - dx0;       /* 扩展后源数据起始偏移（像素） */
+    const uint16_t *src = (const uint16_t *)data;
+    int width = dx1 - dx0;          /* 对齐后宽度（像素） */
+
+    /* 分块：按行分块，每块 FB_CHUNK_ROWS 行，从源数据逐行拷贝到内部 DMA 缓冲 */
+    for (int y = y0; y < y1; y += FB_CHUNK_ROWS)
+    {
+        int rows = (y1 - y) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (y1 - y);
+        /* 把 [y, y+rows) 行、[dx0, dx1) 列拷贝到 s_fb_chunk */
+        for (int r = 0; r < rows; r++)
+        {
+            const uint16_t *src_row = src + (size_t)(y - y0 + r) * (x1 - x0) + offset_px;
+            memcpy(&s_fb_chunk[r * width], src_row, width * 2);
+        }
+        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, dx0, y, dx1, y + rows, s_fb_chunk);
+        if (err != ESP_OK)
+        {
+            return err;
+        }
+        /* DMA 同步屏障：等待分块传输完成再覆写 s_fb_chunk */
         err = esp_lcd_panel_io_tx_param(s_io, -1, NULL, 0);
         if (err != ESP_OK)
         {

@@ -58,8 +58,22 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 /* 屏幕参数与颜色                                                      */
 /* ------------------------------------------------------------------ */
-#define LCD_UI_W 320
-#define LCD_UI_H 480
+/* 物理面板尺寸（ST77926 面板本身是 320x480 竖屏） */
+#define LCD_UI_PHYS_W 320
+#define LCD_UI_PHYS_H 480
+
+/* 显示旋转配置（产品 UI 固定横屏，默认 90°）：
+ *   0   = 竖屏 320x480（原始方向）
+ *   90  = 横屏 480x320（产品默认）
+ *   180 = 竖屏倒转
+ *   270 = 横屏倒转 */
+#ifndef UI_DISPLAY_ROTATION_DEG
+#define UI_DISPLAY_ROTATION_DEG 90
+#endif
+
+/* 当前逻辑分辨率（随旋转变化） */
+#define LCD_UI_W ((UI_DISPLAY_ROTATION_DEG == 90 || UI_DISPLAY_ROTATION_DEG == 270) ? LCD_UI_PHYS_H : LCD_UI_PHYS_W)
+#define LCD_UI_H ((UI_DISPLAY_ROTATION_DEG == 90 || UI_DISPLAY_ROTATION_DEG == 270) ? LCD_UI_PHYS_W : LCD_UI_PHYS_H)
 
 #define LCD_UI_RGB565(r, g, b) \
     (uint16_t)((((r)&0xF8) << 8) | (((g)&0xFC) << 3) | (((b) & 0xFF) >> 3))
@@ -125,6 +139,19 @@ esp_err_t lcd_ui_draw_crosshair(int x, int y, int r, uint16_t color);
  * @brief 整屏刷新：把帧缓冲分块上屏（每帧调用一次）
  */
 esp_err_t lcd_ui_flush(void);
+
+/**
+ * @brief 局部刷新：把指定区域（物理坐标）提交到屏幕
+ *
+ * 用于 LVGL 脏区域刷新。自动把 X 起点/宽度扩展到 4 像素对齐
+ * （ST77926 QSPI 要求），分块经内部 DMA 缓冲发送，完成后返回
+ * （内部已做 DMA 同步屏障）。
+ *
+ * @param x0,y0,x1,y1  物理坐标区域 [x0,x1) × [y0,y1)
+ * @param data  RGB565 像素数据（物理方向，长度 = 宽×高×2）
+ * @return ESP_OK 成功
+ */
+esp_err_t lcd_ui_flush_area(int x0, int y0, int x1, int y1, const void *data);
 
 /**
  * @brief 背光控制（AW9364DNR）

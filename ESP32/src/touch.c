@@ -61,16 +61,16 @@ static void coord_rotate(uint16_t raw_x, uint16_t raw_y, uint16_t *x, uint16_t *
     switch (s_rotation)
     {
     case 90:
-        *x = (uint16_t)(LCD_UI_H - 1 - ry);
+        *x = (uint16_t)(LCD_UI_PHYS_H - 1 - ry);
         *y = (uint16_t)rx;
         break;
     case 180:
-        *x = (uint16_t)(LCD_UI_W - 1 - rx);
-        *y = (uint16_t)(LCD_UI_H - 1 - ry);
+        *x = (uint16_t)(LCD_UI_PHYS_W - 1 - rx);
+        *y = (uint16_t)(LCD_UI_PHYS_H - 1 - ry);
         break;
     case 270:
         *x = (uint16_t)ry;
-        *y = (uint16_t)(LCD_UI_W - 1 - rx);
+        *y = (uint16_t)(LCD_UI_PHYS_W - 1 - rx);
         break;
     default: /* 0° 竖屏 */
         *x = (uint16_t)rx;
@@ -218,8 +218,8 @@ static esp_err_t probe_official_st77926(void)
 
     /* 触摸配置：复位低有效、中断低有效（官方示例标准） */
     esp_lcd_touch_config_t tp_cfg = {
-        .x_max = LCD_UI_W,
-        .y_max = LCD_UI_H,
+        .x_max = LCD_UI_PHYS_W,
+        .y_max = LCD_UI_PHYS_H,
         .rst_gpio_num = TOUCH_PIN_TP_RST,
         .int_gpio_num = TOUCH_PIN_TP_INT,
         .levels = {

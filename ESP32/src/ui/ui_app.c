@@ -2,8 +2,8 @@
  * @file ui_app.c
  * @brief LVGL 产品 UI 实现
  *
- * 阶段1：LVGL 最小初始化 + 空 display（验证 LVGL 能在当前 lcd_ui 环境运行）
- * 后续阶段在此基础扩展：显示端口 → 输入端口 → 状态 → 页面
+ * 阶段2：接入显示端口（ui_port_display → lcd_ui_flush_area）
+ * 后续阶段继续扩展：输入端口 → 状态 → 页面
  */
 
 #include "ui_app.h"
@@ -15,6 +15,8 @@
 #include "freertos/task.h"
 
 #include "lvgl.h"
+
+#include "ui_port_display.h"
 
 static const char *TAG = "ui_app";
 
@@ -38,7 +40,8 @@ static void ui_loop_task(void *arg)
     while (1)
     {
         lv_timer_handler(); /* 处理 LVGL 定时器/刷新 */
-        vTaskDelay(pdMS_TO_TICKS(5));
+        /* 释放 CPU：16ms 周期（约 60fps 上限），避免饿死 IDLE0 触发看门狗 */
+        vTaskDelay(pdMS_TO_TICKS(16));
     }
 }
 
@@ -50,24 +53,24 @@ esp_err_t ui_app_start(void)
     /* 初始化 LVGL 核心 */
     lv_init();
 
-    /* 阶段1：创建空 display（占位，阶段2 接入 ui_port_display 真实显示） */
-    lv_display_t *disp = lv_display_create(480, 320);
+    /* 接入显示端口（lcd_ui 局部刷新 + 旋转） */
+    lv_display_t *disp = ui_port_display_create();
     if (disp == NULL)
     {
-        ESP_LOGE(TAG, "lv_display_create failed");
+        ESP_LOGE(TAG, "ui_port_display_create failed");
         return ESP_ERR_NO_MEM;
     }
-    lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
 
-    /* 阶段1：简单占位标签验证 LVGL 渲染管线 */
+    /* 阶段2：简单占位 label 验证旋转后渲染 */
     lv_obj_t *label = lv_label_create(lv_scr_act());
-    lv_label_set_text(label, "LVGL 9.5 ready");
+    lv_label_set_text(label, "LVGL 9.5 480x320");
     lv_obj_center(label);
 
-    /* 启动 LVGL 任务（心跳 + 主循环） */
+    /* 启动 LVGL 任务：心跳（CPU0）+ 主循环（CPU1，优先级 3 低于外设任务，
+     * 避免长时间占用 CPU 饿死 IDLE/其他任务触发看门狗） */
     xTaskCreatePinnedToCore(ui_tick_task, "ui_tick", 2048, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(ui_loop_task, "ui_loop", 4096, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(ui_loop_task, "ui_loop", 8192, NULL, 3, NULL, 1);
 
-    ESP_LOGI(TAG, "ui_app started (stage 1: minimal LVGL)");
+    ESP_LOGI(TAG, "ui_app started (stage 2: display port)");
     return ESP_OK;
 }
