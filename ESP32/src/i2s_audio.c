@@ -132,7 +132,7 @@ esp_err_t i2s_audio_read(int32_t *buf, size_t frames)
     }
     size_t bytes_read = 0;
     esp_err_t err = i2s_channel_read(s_rx, buf, frames * sizeof(int32_t), &bytes_read,
-                                     pdMS_TO_TICKS(200));
+                                     pdMS_TO_TICKS(50)); /* 小于 JustFloat 轮询周期 50ms */
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RX read failed: %s", esp_err_to_name(err));
         return err;
