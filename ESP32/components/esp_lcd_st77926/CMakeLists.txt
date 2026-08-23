@@ -1,0 +1,4 @@
+idf_component_register(SRCS "esp_lcd_st77926.c" "esp_lcd_st77926_qspi.c"
+                       INCLUDE_DIRS "include"
+                       PRIV_INCLUDE_DIRS "priv_include"
+                       REQUIRES "esp_lcd" "driver")

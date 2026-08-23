@@ -1,8 +1,8 @@
 /**
  * @file main.c
- * @brief IP5306-I2C 电源管理 + I2S 音频采集，UART0 JustFloat 输出
+ * @brief IP5306-I2C 电源管理 + I2S 音频采集 + ST77926 QSPI 屏幕，UART0 JustFloat 输出
  *
- * 架构：双 FreeRTOS 任务 + 共享缓存（单写单读，无锁安全）
+ * 架构：多 FreeRTOS 任务 + 共享缓存（单写单读，无锁安全）
  *
  *  任务1 IP5306 轮询（慢速 500ms）：
  *    状态机 IDLE→READING→UPDATING→IDLE，完整读 4 个寄存器后更新共享缓存，
@@ -11,6 +11,9 @@
  *  任务2 JustFloat 输出（快速 20ms / 50Hz）：
  *    读共享缓存（IP5306 状态）+ 外部按键 + 麦克风 RMS/peak(dBFS)
  *    → 打包 JustFloat 帧 → UART0
+ *
+ *  任务3 屏幕刷新（帧同步 60Hz）：
+ *    ST77926 QSPI 屏按帧刷新：TE 撕裂同步 → 绘制场景 → 整帧推上屏
  *
  * JustFloat 帧（7 通道 float + 帧尾 0x00 0x00 0x80 0x7F）：
  *   ch1=charging  ch2=charge_full  ch3=light_load
@@ -31,6 +34,7 @@
 
 #include "ip5306.h"
 #include "i2s_audio.h"
+#include "lcd_ui.h"
 #include "uart_justfloat.h"
 
 static const char *TAG = "main";
@@ -64,6 +68,16 @@ static void key_gpio_init(void)
 static inline int key_read(int gpio)
 {
     return (gpio_get_level(gpio) == 0) ? 1 : 0;
+}
+
+/* 诊断：打印两个按键 GPIO 原始电平 */
+static void key_diag(void)
+{
+    static int n;
+    if (n++ < 10) {
+        ESP_LOGI(TAG, "key diag: IO38=%d IO4=%d (高=未按, 低=按下)",
+                 gpio_get_level(KEY1_GPIO), gpio_get_level(KEY2_GPIO));
+    }
 }
 
 /* ================================================================== */
@@ -168,6 +182,7 @@ static void justfloat_output_task(void *arg)
         /* 读取外部按键状态（GPIO 实时电平，按下=1） */
         int key1 = key_read(KEY1_GPIO);
         int key2 = key_read(KEY2_GPIO);
+        key_diag();
 
         float data[7] = {
             st.charging ? 1.0f : 0.0f,
@@ -182,6 +197,37 @@ static void justfloat_output_task(void *arg)
         uart_justfloat_send(data, 7);
 
         vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+/* ================================================================== */
+/* 任务3：屏幕显示（官方组件 + 纯色/文字验证）                         */
+/* ================================================================== */
+static void lcd_demo_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "LCD demo task started (framebuffer mode)");
+
+    /* 深蓝背景 + 顶部色条 + Hello World + 帧计数，按帧刷新 */
+    uint16_t bg = LCD_UI_RGB565(0x10, 0x1A, 0x30);
+    int frame = 0;
+    while (1) {
+        lcd_ui_fill_screen(bg);
+
+        lcd_ui_fill_rect(0, 0, 320, 8, LCD_UI_RED);
+        lcd_ui_fill_rect(0, 8, 320, 16, LCD_UI_GREEN);
+        lcd_ui_fill_rect(0, 16, 320, 24, LCD_UI_BLUE);
+
+        lcd_ui_draw_string(56, 200, "Hello World!", LCD_UI_WHITE, bg);
+        lcd_ui_draw_string(32, 240, "SuperMilkCard ESP32-S3", LCD_UI_YELLOW, bg);
+
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Frame %d", frame);
+        lcd_ui_draw_string(56, 280, buf, LCD_UI_CYAN, bg);
+
+        lcd_ui_flush(); /* 一次整屏刷新 */
+        frame++;
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -270,9 +316,30 @@ void app_main(void)
     /* 4.5 外部按键 GPIO 初始化（IO38 / IO4） */
     key_gpio_init();
 
-    /* 5. 启动两个并行任务 */
+    /* 4.6 ST77926 QSPI 屏幕初始化（乐鑫官方组件）+ 背光点亮 */
+    ESP_LOGI(TAG, "--- ST77926 QSPI LCD init (official component) ---");
+    err = lcd_ui_init();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "lcd_ui_init failed: %s (screen disabled)", esp_err_to_name(err));
+    }
+    else
+    {
+        err = lcd_ui_set_backlight(true);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "lcd_ui_set_backlight failed: %s", esp_err_to_name(err));
+        }
+        ESP_LOGI(TAG, "LCD ready (official component)");
+    }
+
+    /* 5. 启动并行任务 */
     xTaskCreatePinnedToCore(ip5306_poll_task, "ip5306_poll", 4096, NULL, 5, NULL, 1);
     xTaskCreatePinnedToCore(justfloat_output_task, "justfloat_out", 4096, NULL, 6, NULL, 1);
+    if (err == ESP_OK)
+    {
+        xTaskCreatePinnedToCore(lcd_demo_task, "lcd_demo", 4096, NULL, 4, NULL, 0);
+    }
 
     /* 主任务不再做事，挂起 */
     vTaskDelete(NULL);
