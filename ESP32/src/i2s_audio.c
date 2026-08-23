@@ -69,14 +69,15 @@ esp_err_t i2s_audio_init(void)
         return err;
     }
 
-    /* 时钟：48kHz，MCLK=256x。ICS-43434 需 64 BCLK/帧，由 32-bit slot×2 保证 */
+    /* 时钟：48kHz，MCLK=384x（24-bit 位宽要求 MCLK 为采样率的 3 的倍数）。
+     * ICS-43434 需 64 BCLK/帧，由 32-bit slot×2 保证 */
     i2s_std_clk_config_t clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(I2S_AUDIO_SAMPLE_RATE);
+    clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_384;
 
-    /* 槽位：16-bit 数据位宽 / 32-bit slot（64 BCLK/帧，满足 ICS-43434 要求）
-     * 关键：用 16-bit 数据位宽，写入 ±32768 即满幅，功放才能输出最大功率。
-     * 之前用 32-bit 位宽导致写入 30000 只有 -97dBFS，声音极小。 */
+    /* 槽位：24-bit 数据位宽 / 32-bit slot（64 BCLK/帧，满足 ICS-43434 要求）
+     * 24-bit 匹配 ICS-43434 原生数据格式，RX 读到完整 24-bit 值 */
     i2s_std_slot_config_t slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
-        I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO);
+        I2S_DATA_BIT_WIDTH_24BIT, I2S_SLOT_MODE_STEREO);
     slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT; /* 保持 64 BCLK/帧 */
 
     /* 单份 GPIO 配置：BCLK=17, WS=8, DOUT=7（功放）, DIN=18（麦克风） */
@@ -131,11 +132,11 @@ esp_err_t i2s_audio_read(int32_t *buf, size_t frames)
         return ESP_ERR_INVALID_STATE;
     }
     size_t bytes_read = 0;
+    /* 非阻塞读取：DMA 有数据立即返回，无数据立即超时（不拖慢 JustFloat 轮询） */
     esp_err_t err = i2s_channel_read(s_rx, buf, frames * sizeof(int32_t), &bytes_read,
-                                     pdMS_TO_TICKS(50)); /* 小于 JustFloat 轮询周期 50ms */
+                                     pdMS_TO_TICKS(5));
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "RX read failed: %s", esp_err_to_name(err));
-        return err;
+        return err; /* 不打印日志，避免污染串口 */
     }
     return ESP_OK;
 }

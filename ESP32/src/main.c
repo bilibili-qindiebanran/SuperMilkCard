@@ -1,17 +1,17 @@
 /**
  * @file main.c
- * @brief IP5306-I2C 电源管理 + I2S 音频采集，串口 JustFloat 协议输出
+ * @brief IP5306-I2C 电源管理 + I2S 音频采集，UART0 JustFloat 输出
  *
- * 流程：
- *  1. 初始化 I2C 总线，检测 IP5306（地址 0x75）并读取电源状态
- *  2. 初始化 I2S 音频（ICS-43434 麦克风采集）
- *  3. 开机打印初始化日志后，进入 JustFloat 协议轮询输出
+ * 架构：双 FreeRTOS 任务 + 共享缓存（单写单读，无锁安全）
  *
- * JustFloat 帧（VOFA+ 可解析）：5 个 float + 帧尾 0x00 0x00 0x80 0x7F
- *   ch1=charging  ch2=charge_full  ch3=light_load
- *   ch4=麦克风 RMS  ch5=麦克风峰值
+ *  任务1 IP5306 轮询（慢速 500ms）：
+ *    状态机 IDLE→READING→UPDATING→IDLE，完整读 4 个寄存器后更新共享缓存，
+ *    中途失败不写部分数据；若上次未完成则跳过本次（防 I2C 冲突）
  *
- * IP5306 安全策略：默认【只读】，不做寄存器写入。
+ *  任务2 JustFloat 输出（快速 20ms / 50Hz）：
+ *    读共享缓存（IP5306 状态）+ 麦克风 RMS/峰值 → 打包 JustFloat 帧 → UART0
+ *
+ * 串口分工：UART0(GPIO43/44)=JustFloat 二进制，USB-Serial/JTAG=日志
  */
 
 #include <math.h>
@@ -24,9 +24,104 @@
 
 #include "ip5306.h"
 #include "i2s_audio.h"
+#include "uart_justfloat.h"
 
 static const char *TAG = "main";
 
+/* ================================================================== */
+/* 共享缓存：IP5306 状态（单写单读，无锁）                             */
+/* ================================================================== */
+static ip5306_status_t s_ip5306_cache;
+
+/* IP5306 轮询任务状态机 */
+typedef enum {
+    IP5306_STATE_IDLE,     /* 空闲，可发起新一轮读取 */
+    IP5306_STATE_READING,  /* 正在读寄存器（未完成，跳过下次） */
+    IP5306_STATE_UPDATING, /* 读取完成，准备写缓存 */
+} ip5306_task_state_t;
+
+static volatile ip5306_task_state_t s_ip5306_state = IP5306_STATE_IDLE;
+
+/* ================================================================== */
+/* 任务1：IP5306 慢速轮询（状态机）                                    */
+/* ================================================================== */
+static void ip5306_poll_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "IP5306 poll task started (500ms interval)");
+
+    while (1) {
+        /* 状态机：仅 IDLE 状态允许发起读取，防止重入/冲突 */
+        if (s_ip5306_state == IP5306_STATE_IDLE) {
+            s_ip5306_state = IP5306_STATE_READING;
+
+            ip5306_status_t st;
+            bool ok = (ip5306_get_status(&st) == ESP_OK);
+
+            /* 无论成功失败都回到 IDLE，下次再试；失败则缓存保持旧值 */
+            s_ip5306_state = IP5306_STATE_UPDATING;
+            if (ok) {
+                s_ip5306_cache = st; /* 单写：仅此任务写 */
+            }
+            s_ip5306_state = IP5306_STATE_IDLE;
+        }
+        /* 若仍处于 READING（理论上不会，因为单任务）也放行，避免卡死 */
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+/* ================================================================== */
+/* 任务2：JustFloat 快速输出（50Hz）                                   */
+/* ================================================================== */
+static void justfloat_output_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "JustFloat output task started (50Hz)");
+
+    while (1) {
+        /* 读缓存（IP5306 状态）——只读，无锁安全 */
+        ip5306_status_t st = s_ip5306_cache;
+
+        /* 读麦克风一帧，计算 RMS 和峰值并转 dBFS（64 帧非阻塞，约 2.7ms 数据） */
+        static int32_t mic_buf[64 * 2];
+        float mic_rms_db = -100.0f, mic_peak_db = -100.0f;
+        if (i2s_audio_read(mic_buf, 64) == ESP_OK)
+        {
+            int64_t acc = 0;
+            int32_t peak = 0;
+            for (size_t i = 0; i < 64; i++)
+            {
+                int32_t l = mic_buf[i * 2] >> 8; /* 24-bit 数据 → 16-bit 有效 */
+                int32_t a = (l < 0) ? -l : l;
+                if (a > peak) peak = a;
+                acc += (int64_t)l * l;
+            }
+            /* RX 是 24-bit 位宽，数据为 24-bit 值（>>8 后仍可能 >32768）。
+             * dBFS 用 24-bit 满幅 8388608 作基准 */
+            float rms = sqrtf((float)acc / 64);
+            mic_rms_db = 20.0f * log10f((rms + 1.0f) / 8388608.0f);
+            mic_peak_db = 20.0f * log10f(((float)peak + 1.0f) / 8388608.0f);
+            if (mic_rms_db < -100.0f) mic_rms_db = -100.0f;
+            if (mic_peak_db < -100.0f) mic_peak_db = -100.0f;
+        }
+
+        float data[5] = {
+            st.charging ? 1.0f : 0.0f,
+            st.charge_full ? 1.0f : 0.0f,
+            st.light_load ? 1.0f : 0.0f,
+            mic_rms_db,
+            mic_peak_db,
+        };
+        /* JustFloat 数据走 UART0（GPIO43/44 → VOFA+），日志仍走 USB */
+        uart_justfloat_send(data, 5);
+
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+/* ================================================================== */
+/* 启动辅助                                                           */
+/* ================================================================== */
 static void print_config_regs(void)
 {
     static const struct
@@ -57,75 +152,11 @@ static void print_config_regs(void)
     }
 }
 
-/* JustFloat 帧尾（VOFA+ 协议：0x00 0x00 0x80 0x7F） */
-static const uint8_t JUSTFLOAT_TAIL[4] = {0x00, 0x00, 0x80, 0x7F};
-
-static void print_status(void)
-{
-    ip5306_status_t st;
-    if (ip5306_get_status(&st) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "get status failed");
-        return;
-    }
-    ESP_LOGI(TAG,
-             "status: charging=%d full=%d light_load=%d | key: short=%d long=%d double=%d",
-             st.charging, st.charge_full, st.light_load,
-             st.key_short, st.key_long, st.key_double);
-}
-
-/**
- * @brief 以 JustFloat 协议输出 IP5306 状态 + 麦克风音量（VOFA+ 可解析）
- *
- * 帧格式：N 个 float（小端 4 字节）+ 帧尾 0x00 0x00 0x80 0x7F
- * 通道：
- *   ch1=charging  ch2=charge_full  ch3=light_load
- *   ch4=麦克风 RMS  ch5=麦克风峰值
- * 输出频率：调用方控制（当前 20Hz，每 50ms 一帧）
- */
-static void print_status_justfloat(void)
-{
-    ip5306_status_t st;
-    if (ip5306_get_status(&st) != ESP_OK)
-    {
-        return;
-    }
-
-    /* 读麦克风一帧，计算 RMS 和峰值 */
-    static int32_t mic_buf[I2S_AUDIO_FRAMES_PER_BUF * 2];
-    float mic_rms = 0.0f, mic_peak = 0.0f;
-    if (i2s_audio_read(mic_buf, I2S_AUDIO_FRAMES_PER_BUF) == ESP_OK)
-    {
-        int64_t acc = 0;
-        int32_t peak = 0;
-        for (size_t i = 0; i < I2S_AUDIO_FRAMES_PER_BUF; i++)
-        {
-            int32_t l = mic_buf[i * 2] >> 8; /* 24-bit 左对齐 → 16-bit */
-            int32_t a = (l < 0) ? -l : l;
-            if (a > peak) peak = a;
-            acc += (int64_t)l * l;
-        }
-        mic_rms = sqrtf((float)acc / I2S_AUDIO_FRAMES_PER_BUF);
-        mic_peak = (float)peak;
-    }
-
-    float data[5] = {
-        st.charging ? 1.0f : 0.0f,
-        st.charge_full ? 1.0f : 0.0f,
-        st.light_load ? 1.0f : 0.0f,
-        mic_rms,
-        mic_peak,
-    };
-    /* 直接写二进制到 console（USB-Serial/JTAG），避免日志时间戳污染 */
-    fwrite(data, sizeof(float), 5, stdout);
-    fwrite(JUSTFLOAT_TAIL, 1, 4, stdout);
-    fflush(stdout);
-}
-
 void app_main(void)
 {
     ESP_LOGI(TAG, "IP5306-I2C comm test starting...");
 
+    /* 1. IP5306 初始化 + 在线检测 */
     esp_err_t err = ip5306_init();
     if (err != ESP_OK)
     {
@@ -133,7 +164,6 @@ void app_main(void)
         return;
     }
 
-    /* 0. 直接读 IP5306 状态寄存器验证在线（i2c_master_probe 对 IP5306 不适用） */
     uint8_t reg0 = 0xFF;
     err = ip5306_read_reg(IP5306_REG_READ0, &reg0);
     if (err == ESP_OK)
@@ -143,47 +173,38 @@ void app_main(void)
     }
     else
     {
-        ESP_LOGE(TAG,
-                 ">>> IP5306 not responding: %s. Check wiring SDA=%d/SCL=%d, 2.2k pull-up, "
-                 "chip power (BAT/VIN), and that it's the IP5306_I2C custom version.",
-                 esp_err_to_name(err), IP5306_PIN_SDA, IP5306_PIN_SCL);
-        return;
+        ESP_LOGW(TAG, ">>> IP5306 init read failed: %s (will retry in poll task)",
+                 esp_err_to_name(err));
+        /* 不 return：即使 IP5306 暂不可达，JustFloat 输出照常运行 */
     }
 
-    /* 1. 扫描（确认在线并打印） */
-    int found = ip5306_scan_bus();
-    if (found == 0)
-    {
-        ESP_LOGE(TAG, "IP5306 scan failed, abort.");
-        return;
-    }
-
-    /* 2. 出厂配置寄存器 */
+    /* 2. 出厂配置寄存器（仅启动时打印一次） */
     ESP_LOGI(TAG, "--- factory config registers ---");
     print_config_regs();
 
-    /* 3. 电源状态 */
-    ESP_LOGI(TAG, "--- power status ---");
-    print_status();
-
-    /* 4. I2S 音频初始化（ICS-43434 麦克风 + MAX98357A 功放） */
+    /* 3. I2S 音频初始化（ICS-43434 麦克风） */
     ESP_LOGI(TAG, "--- I2S audio init ---");
     err = i2s_audio_init();
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "i2s_audio_init failed: %s, abort audio test.", esp_err_to_name(err));
+        ESP_LOGE(TAG, "i2s_audio_init failed: %s", esp_err_to_name(err));
     }
     else
     {
-        /* I2S 音频初始化成功，但不启用环回（避免啸叫）。
-         * 麦克风/功放已就绪，供后续功能使用。 */
-        ESP_LOGI(TAG, "I2S audio ready (mic + amp), loopback disabled.");
+        ESP_LOGI(TAG, "I2S audio ready (mic), loopback disabled.");
     }
 
-    /* IP5306 状态轮询（JustFloat 协议输出，供 VOFA+ 等上位机解析） */
-    while (1)
+    /* 4. UART0 JustFloat 初始化 */
+    err = uart_justfloat_init();
+    if (err != ESP_OK)
     {
-        print_status_justfloat();
-        vTaskDelay(pdMS_TO_TICKS(200));
+        ESP_LOGE(TAG, "uart_justfloat_init failed: %s", esp_err_to_name(err));
     }
+
+    /* 5. 启动两个并行任务 */
+    xTaskCreatePinnedToCore(ip5306_poll_task, "ip5306_poll", 4096, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(justfloat_output_task, "justfloat_out", 4096, NULL, 6, NULL, 1);
+
+    /* 主任务不再做事，挂起 */
+    vTaskDelete(NULL);
 }

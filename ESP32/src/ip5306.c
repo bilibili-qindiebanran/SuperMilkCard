@@ -63,11 +63,10 @@ esp_err_t ip5306_read_reg(uint8_t reg, uint8_t *val)
     if (s_dev == NULL || val == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    /* 静默失败（不打印日志）：轮询阶段频繁读取，失败日志会污染 JustFloat 串口流。
+     * 20ms 超时：IP5306 正常响应只需数微秒，20ms 足够且不会长时间阻塞轮询 */
     esp_err_t err = i2c_master_transmit_receive(
-        s_dev, &reg, 1, val, 1, pdMS_TO_TICKS(100));
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "read reg 0x%02X failed: %s", reg, esp_err_to_name(err));
-    }
+        s_dev, &reg, 1, val, 1, pdMS_TO_TICKS(20));
     return err;
 }
 
