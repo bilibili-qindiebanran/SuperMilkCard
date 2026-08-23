@@ -3,9 +3,9 @@
  * @brief LVGL 显示端口：把 LVGL 渲染输出接入 lcd_ui（QSPI + 分块 DMA）
  *
  * 设计：
- *   - LVGL 逻辑分辨率 480x320（横屏），lcd_ui 物理面板 320x480（竖屏）
- *   - LVGL 软件旋转（lv_display_set_rotation 90）处理方向，flush_cb 收到物理坐标
- *   - flush_cb 内做 RGB565 字节序交换（面板要求大端），交给 lcd_ui_flush_area
+ *   - LVGL 使用 480x320 横屏逻辑坐标与双条带 PARTIAL 缓冲
+ *   - lcd_ui 在 DMA 行缓冲中将每个逻辑区域旋转为物理 320x480 面板坐标
+ *   - RGB565 字节序仅在 lcd_ui 的内部 DMA 行缓冲中转换，不能改写 LVGL 整帧缓冲
  *   - DMA 发送完成后 lv_display_flush_ready()
  */
 

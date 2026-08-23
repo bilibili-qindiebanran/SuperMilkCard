@@ -44,7 +44,9 @@
 static const char *TAG = "main";
 
 /* ================================================================== */
-/* 外部按键（IO38 / IO4，外部 10k 上拉，按下下拉=低电平）              */
+/* 外部按键（IO38 / IO4）                                              */
+/* 初始化由 board_keys 模块接管（ui_port_input 调用）；此处仅保留      */
+/* 原始电平读取给 JustFloat 通道（ch6/ch7）                            */
 /* ================================================================== */
 #ifndef KEY1_GPIO
 #define KEY1_GPIO 38
@@ -53,35 +55,10 @@ static const char *TAG = "main";
 #define KEY2_GPIO 4
 #endif
 
-static void key_gpio_init(void)
-{
-    /* 外部已有 10k 上拉，仅配输入模式（不上拉不下拉，避免干扰外部上拉） */
-    gpio_config_t io = {
-        .pin_bit_mask = (1ULL << KEY1_GPIO) | (1ULL << KEY2_GPIO),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&io);
-    ESP_LOGI(TAG, "Key GPIOs ready: KEY1=GPIO%d KEY2=GPIO%d (10k ext pullup, press=low)",
-             KEY1_GPIO, KEY2_GPIO);
-}
-
-/* 读取按键：低电平=按下 → 返回 1 */
+/* 读取按键原始电平：低=按下 → 返回 1 */
 static inline int key_read(int gpio)
 {
     return (gpio_get_level(gpio) == 0) ? 1 : 0;
-}
-
-/* 诊断：打印两个按键 GPIO 原始电平 */
-static void key_diag(void)
-{
-    static int n;
-    if (n++ < 10) {
-        ESP_LOGI(TAG, "key diag: IO38=%d IO4=%d (高=未按, 低=按下)",
-                 gpio_get_level(KEY1_GPIO), gpio_get_level(KEY2_GPIO));
-    }
 }
 
 /* ================================================================== */
@@ -186,7 +163,6 @@ static void justfloat_output_task(void *arg)
         /* 读取外部按键状态（GPIO 实时电平，按下=1） */
         int key1 = key_read(KEY1_GPIO);
         int key2 = key_read(KEY2_GPIO);
-        key_diag();
 
         float data[7] = {
             st.charging ? 1.0f : 0.0f,
@@ -298,9 +274,6 @@ void app_main(void)
     {
         ESP_LOGE(TAG, "uart_justfloat_init failed: %s", esp_err_to_name(err));
     }
-
-    /* 4.5 外部按键 GPIO 初始化（IO38 / IO4） */
-    key_gpio_init();
 
     /* 4.6 ST77926 QSPI 屏幕初始化（乐鑫官方组件）+ 背光点亮 */
     ESP_LOGI(TAG, "--- ST77926 QSPI LCD init (official component) ---");

@@ -60,6 +60,13 @@ static inline uint16_t lcd_swap16(uint16_t v)
     return (uint16_t)((v >> 8) | (v << 8));
 }
 
+static esp_err_t lcd_ui_apply_rotation(void)
+{
+    esp_err_t err = esp_lcd_panel_swap_xy(s_panel, false);
+    if (err != ESP_OK) return err;
+    return esp_lcd_panel_mirror(s_panel, false, false);
+}
+
 /* ================================================================== */
 /* 初始化                                                             */
 /* ================================================================== */
@@ -138,6 +145,8 @@ esp_err_t lcd_ui_init(void)
         ESP_LOGE(TAG, "esp_lcd_panel_init failed: %s", esp_err_to_name(err));
         return err;
     }
+    err = lcd_ui_apply_rotation();
+    if (err != ESP_OK) return err;
     err = esp_lcd_panel_disp_on_off(s_panel, true);
     if (err != ESP_OK)
     {
@@ -330,7 +339,7 @@ esp_err_t lcd_ui_draw_crosshair(int x, int y, int r, uint16_t color)
 /* ================================================================== */
 /* 整屏刷新：按行分块经内部 RAM 发送（规避 PSRAM DMA underflow）      */
 /* ================================================================== */
-#define FB_CHUNK_ROWS 64 /* 每块 64 行 = 320*64*2 = 40KB，480/64=8 次事务 */
+#define FB_CHUNK_ROWS 64
 static uint16_t s_fb_chunk[LCD_UI_PHYS_W * FB_CHUNK_ROWS] __attribute__((aligned(4)));
 
 esp_err_t lcd_ui_flush(void)
@@ -365,7 +374,7 @@ esp_err_t lcd_ui_flush(void)
 }
 
 /* ================================================================== */
-/* 局部刷新：LVGL 脏区域 → 4 像素对齐 → 分块 DMA 发送                */
+/* 局部刷新：紧凑 LVGL 逻辑区域 → 旋转 → 4 像素对齐 → 分块 DMA 发送      */
 /* ================================================================== */
 esp_err_t lcd_ui_flush_area(int x0, int y0, int x1, int y1, const void *data)
 {
@@ -374,50 +383,62 @@ esp_err_t lcd_ui_flush_area(int x0, int y0, int x1, int y1, const void *data)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* 边界钳制 */
+    /* data 是由 LVGL 提供的紧凑逻辑区域，行跨度等于 x1 - x0。 */
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
-    if (x1 > LCD_UI_PHYS_W) x1 = LCD_UI_PHYS_W;
-    if (y1 > LCD_UI_PHYS_H) y1 = LCD_UI_PHYS_H;
+    if (x1 > LCD_UI_W) x1 = LCD_UI_W;
+    if (y1 > LCD_UI_H) y1 = LCD_UI_H;
     if (x0 >= x1 || y0 >= y1)
     {
         return ESP_OK;
     }
 
-    /* ST77926 QSPI 要求 X 起点/宽度 4 像素对齐：向左侧扩展起点、
-     * 向右侧扩展终点。调用方（LVGL flush_cb）提供的 data 是 x0 起始
-     * 的连续行数据，扩展后需把起始偏移加上。 */
-    int dx0 = x0 & ~3;              /* 向下对齐到 4 */
-    int dx1 = (x1 + 3) & ~3;        /* 向上对齐到 4 */
-    int offset_px = x0 - dx0;       /* 扩展后源数据起始偏移（像素） */
-    const uint16_t *src = (const uint16_t *)data;
-    int width = dx1 - dx0;          /* 对齐后宽度（像素） */
-
-    /* 分块：按行分块，每块 FB_CHUNK_ROWS 行，从源数据逐行拷贝到内部 DMA 缓冲 */
-    for (int y = y0; y < y1; y += FB_CHUNK_ROWS)
+    /* ST77926 QSPI 要求窗口 X 起点和宽度按 4 像素对齐。完整帧源数据
+     * 覆盖对齐扩展出的列，因此可以安全读取 dx0..dx1。 */
+    int dx0 = y0 & ~3;
+    int dx1 = (y1 + 3) & ~3;
+    if (dx1 > LCD_UI_PHYS_W)
     {
-        int rows = (y1 - y) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (y1 - y);
-        /* 把 [y, y+rows) 行、[dx0, dx1) 列拷贝到 s_fb_chunk */
-        for (int r = 0; r < rows; r++)
+        dx1 = LCD_UI_PHYS_W;
+    }
+    int py0 = LCD_UI_PHYS_H - x1;
+    int py1 = LCD_UI_PHYS_H - x0;
+    int width = dx1 - dx0;
+    int src_width = x1 - x0;
+    const uint16_t *src = (const uint16_t *)data;
+
+    for (int py = py0; py < py1; py += FB_CHUNK_ROWS)
+    {
+        int rows = (py1 - py) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (py1 - py);
+        for (int row = 0; row < rows; row++)
         {
-            const uint16_t *src_row = src + (size_t)(y - y0 + r) * (x1 - x0) + offset_px;
-            memcpy(&s_fb_chunk[r * width], src_row, width * 2);
+            const int logical_x = LCD_UI_PHYS_H - 1 - (py + row);
+            uint16_t *dst_row = &s_fb_chunk[row * width];
+            for (int col = 0; col < width; col++)
+            {
+                const int logical_y = dx0 + col;
+                int src_y = logical_y;
+                if (src_y < y0) src_y = y0;
+                if (src_y >= y1) src_y = y1 - 1;
+                dst_row[col] = lcd_swap16(src[(size_t)(src_y - y0) * src_width + logical_x - x0]);
+            }
         }
-        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, dx0, y, dx1, y + rows, s_fb_chunk);
+
+        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, dx0, py, dx1, py + rows, s_fb_chunk);
         if (err != ESP_OK)
         {
             return err;
         }
-        /* DMA 同步屏障：等待分块传输完成再覆写 s_fb_chunk */
+        /* 颜色事务由 DMA 异步执行，复用 s_fb_chunk 前必须等待传输结束。 */
         err = esp_lcd_panel_io_tx_param(s_io, -1, NULL, 0);
         if (err != ESP_OK)
         {
             return err;
         }
     }
+
     return ESP_OK;
 }
-
 esp_err_t lcd_ui_draw_bitmap(int x0, int y0, int x1, int y1, const void *data)
 {
     if (s_panel == NULL)

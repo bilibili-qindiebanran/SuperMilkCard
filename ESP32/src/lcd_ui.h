@@ -141,14 +141,14 @@ esp_err_t lcd_ui_draw_crosshair(int x, int y, int r, uint16_t color);
 esp_err_t lcd_ui_flush(void);
 
 /**
- * @brief 局部刷新：把指定区域（物理坐标）提交到屏幕
+ * @brief 局部刷新：把指定区域（当前逻辑坐标）提交到屏幕
  *
  * 用于 LVGL 脏区域刷新。自动把 X 起点/宽度扩展到 4 像素对齐
  * （ST77926 QSPI 要求），分块经内部 DMA 缓冲发送，完成后返回
  * （内部已做 DMA 同步屏障）。
  *
- * @param x0,y0,x1,y1  物理坐标区域 [x0,x1) × [y0,y1)
- * @param data  RGB565 像素数据（物理方向，长度 = 宽×高×2）
+ * @param x0,y0,x1,y1  逻辑坐标区域 [x0,x1) × [y0,y1)
+ * @param data  紧凑区域 RGB565 数据（宽×高×2，原生字节序）
  * @return ESP_OK 成功
  */
 esp_err_t lcd_ui_flush_area(int x0, int y0, int x1, int y1, const void *data);
