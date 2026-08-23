@@ -395,14 +395,14 @@ esp_err_t lcd_ui_flush_area(int x0, int y0, int x1, int y1, const void *data)
 
     /* ST77926 QSPI 要求窗口 X 起点和宽度按 4 像素对齐。完整帧源数据
      * 覆盖对齐扩展出的列，因此可以安全读取 dx0..dx1。 */
-    int dx0 = y0 & ~3;
-    int dx1 = (y1 + 3) & ~3;
+    int dx0 = (LCD_UI_PHYS_W - y1) & ~3;
+    int dx1 = (LCD_UI_PHYS_W - y0 + 3) & ~3;
     if (dx1 > LCD_UI_PHYS_W)
     {
         dx1 = LCD_UI_PHYS_W;
     }
-    int py0 = LCD_UI_PHYS_H - x1;
-    int py1 = LCD_UI_PHYS_H - x0;
+    int py0 = x0;
+    int py1 = x1;
     int width = dx1 - dx0;
     int src_width = x1 - x0;
     const uint16_t *src = (const uint16_t *)data;
@@ -412,11 +412,11 @@ esp_err_t lcd_ui_flush_area(int x0, int y0, int x1, int y1, const void *data)
         int rows = (py1 - py) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (py1 - py);
         for (int row = 0; row < rows; row++)
         {
-            const int logical_x = LCD_UI_PHYS_H - 1 - (py + row);
+            const int logical_x = py + row;
             uint16_t *dst_row = &s_fb_chunk[row * width];
             for (int col = 0; col < width; col++)
             {
-                const int logical_y = dx0 + col;
+                const int logical_y = LCD_UI_PHYS_W - 1 - (dx0 + col);
                 int src_y = logical_y;
                 if (src_y < y0) src_y = y0;
                 if (src_y >= y1) src_y = y1 - 1;

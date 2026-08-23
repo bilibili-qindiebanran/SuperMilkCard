@@ -61,16 +61,16 @@ static void coord_rotate(uint16_t raw_x, uint16_t raw_y, uint16_t *x, uint16_t *
     switch (s_rotation)
     {
     case 90:
-        *x = (uint16_t)(LCD_UI_PHYS_H - 1 - ry);
-        *y = (uint16_t)rx;
+        *x = (uint16_t)ry;
+        *y = (uint16_t)(LCD_UI_PHYS_W - 1 - rx);
         break;
     case 180:
         *x = (uint16_t)(LCD_UI_PHYS_W - 1 - rx);
         *y = (uint16_t)(LCD_UI_PHYS_H - 1 - ry);
         break;
     case 270:
-        *x = (uint16_t)ry;
-        *y = (uint16_t)(LCD_UI_PHYS_W - 1 - rx);
+        *x = (uint16_t)(LCD_UI_PHYS_H - 1 - ry);
+        *y = (uint16_t)rx;
         break;
     default: /* 0° 竖屏 */
         *x = (uint16_t)rx;
