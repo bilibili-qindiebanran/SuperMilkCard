@@ -9,13 +9,13 @@
  *    中途失败不写部分数据；若上次未完成则跳过本次（防 I2C 冲突）
  *
  *  任务2 JustFloat 输出（快速 20ms / 50Hz）：
- *    读共享缓存（IP5306 状态）+ 按键计数 + 麦克风 RMS/peak(dBFS)
+ *    读共享缓存（IP5306 状态）+ 外部按键 + 麦克风 RMS/peak(dBFS)
  *    → 打包 JustFloat 帧 → UART0
  *
- * JustFloat 帧（8 通道 float + 帧尾 0x00 0x00 0x80 0x7F）：
+ * JustFloat 帧（7 通道 float + 帧尾 0x00 0x00 0x80 0x7F）：
  *   ch1=charging  ch2=charge_full  ch3=light_load
  *   ch4=麦克风 RMS(dBFS)  ch5=麦克风峰值(dBFS)
- *   ch6=短按次数  ch7=长按次数  ch8=双击次数
+ *   ch6=按键1(IO38)  ch7=按键2(IO4)   （按下=1，外部10k上拉）
  *
  * 串口分工：UART0(GPIO43/44)=JustFloat 二进制，USB-Serial/JTAG=日志
  */
@@ -23,6 +23,7 @@
 #include <math.h>
 #include <stdio.h>
 
+#include "driver/gpio.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -35,14 +36,40 @@
 static const char *TAG = "main";
 
 /* ================================================================== */
+/* 外部按键（IO38 / IO4，外部 10k 上拉，按下下拉=低电平）              */
+/* ================================================================== */
+#ifndef KEY1_GPIO
+#define KEY1_GPIO 38
+#endif
+#ifndef KEY2_GPIO
+#define KEY2_GPIO 4
+#endif
+
+static void key_gpio_init(void)
+{
+    /* 外部已有 10k 上拉，仅配输入模式（不上拉不下拉，避免干扰外部上拉） */
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << KEY1_GPIO) | (1ULL << KEY2_GPIO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io);
+    ESP_LOGI(TAG, "Key GPIOs ready: KEY1=GPIO%d KEY2=GPIO%d (10k ext pullup, press=low)",
+             KEY1_GPIO, KEY2_GPIO);
+}
+
+/* 读取按键：低电平=按下 → 返回 1 */
+static inline int key_read(int gpio)
+{
+    return (gpio_get_level(gpio) == 0) ? 1 : 0;
+}
+
+/* ================================================================== */
 /* 共享缓存：IP5306 状态（单写单读，无锁）                             */
 /* ================================================================== */
 static ip5306_status_t s_ip5306_cache;
-
-/* 按键事件累积计数（轮询任务累加，JustFloat 任务输出后清零） */
-static volatile uint32_t s_key_short_cnt = 0;
-static volatile uint32_t s_key_long_cnt = 0;
-static volatile uint32_t s_key_double_cnt = 0;
 
 /* IP5306 轮询任务状态机 */
 typedef enum {
@@ -71,14 +98,23 @@ static void ip5306_poll_task(void *arg)
             esp_err_t err = ip5306_get_status(&st);
             bool ok = (err == ESP_OK);
 
-            /* 诊断：前 5 次打印读取结果 */
+            /* 诊断：前 5 次打印；之后仅在按键事件变化时打印 */
+            static uint8_t prev_key;
             if (diag < 5) {
                 diag++;
                 if (ok) {
-                    ESP_LOGI(TAG, "IP5306 poll OK: charging=%d full=%d light=%d",
-                             st.charging, st.charge_full, st.light_load);
+                    ESP_LOGI(TAG, "IP5306 poll OK: chg=%d full=%d light=%d key_s=%d key_l=%d key_d=%d",
+                             st.charging, st.charge_full, st.light_load,
+                             st.key_short, st.key_long, st.key_double);
                 } else {
                     ESP_LOGE(TAG, "IP5306 poll failed: %s", esp_err_to_name(err));
+                }
+            } else if (ok) {
+                uint8_t cur_key = (st.key_short ? 1 : 0) | (st.key_long ? 2 : 0) | (st.key_double ? 4 : 0);
+                if (cur_key != prev_key) {
+                    prev_key = cur_key;
+                    ESP_LOGI(TAG, "KEY event: short=%d long=%d double=%d",
+                             st.key_short, st.key_long, st.key_double);
                 }
             }
 
@@ -86,11 +122,6 @@ static void ip5306_poll_task(void *arg)
             s_ip5306_state = IP5306_STATE_UPDATING;
             if (ok) {
                 s_ip5306_cache = st; /* 单写：仅此任务写 */
-
-                /* 按键事件累积计数（驱动已读后清零，这里累加避免漏事件） */
-                if (st.key_short) s_key_short_cnt++;
-                if (st.key_long) s_key_long_cnt++;
-                if (st.key_double) s_key_double_cnt++;
             }
             s_ip5306_state = IP5306_STATE_IDLE;
         }
@@ -134,26 +165,21 @@ static void justfloat_output_task(void *arg)
             if (mic_peak_db < -100.0f) mic_peak_db = -100.0f;
         }
 
-        /* 读取按键事件计数（轮询任务累加，此处读出后清零） */
-        uint32_t k_short = s_key_short_cnt;
-        uint32_t k_long = s_key_long_cnt;
-        uint32_t k_double = s_key_double_cnt;
-        s_key_short_cnt = 0;
-        s_key_long_cnt = 0;
-        s_key_double_cnt = 0;
+        /* 读取外部按键状态（GPIO 实时电平，按下=1） */
+        int key1 = key_read(KEY1_GPIO);
+        int key2 = key_read(KEY2_GPIO);
 
-        float data[8] = {
+        float data[7] = {
             st.charging ? 1.0f : 0.0f,
             st.charge_full ? 1.0f : 0.0f,
             st.light_load ? 1.0f : 0.0f,
             mic_rms_db,
             mic_peak_db,
-            (float)k_short,
-            (float)k_long,
-            (float)k_double,
+            (float)key1,
+            (float)key2,
         };
         /* JustFloat 数据走 UART0（GPIO43/44 → VOFA+），日志仍走 USB */
-        uart_justfloat_send(data, 8);
+        uart_justfloat_send(data, 7);
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -240,6 +266,9 @@ void app_main(void)
     {
         ESP_LOGE(TAG, "uart_justfloat_init failed: %s", esp_err_to_name(err));
     }
+
+    /* 4.5 外部按键 GPIO 初始化（IO38 / IO4） */
+    key_gpio_init();
 
     /* 5. 启动两个并行任务 */
     xTaskCreatePinnedToCore(ip5306_poll_task, "ip5306_poll", 4096, NULL, 5, NULL, 1);
