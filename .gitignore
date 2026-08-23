@@ -22,6 +22,7 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 *~
+.mimosa/
 
 # 日志与临时文件
 *.log
@@ -41,6 +42,13 @@ ESP32/.piolibdeps/
 ESP32/managed_components/
 ESP32/dependencies.lock
 ESP32/sdkconfig.old
+
+# ESP-IDF / PlatformIO 构建时自动生成的文件
+# （注意保留可提交的 sdkconfig.defaults / sdkconfig.defaults.<target>）
+ESP32/sdkconfig
+ESP32/sdkconfig.esp32*
+ESP32/CMakeLists.txt
+ESP32/src/CMakeLists.txt
 
 # 固件与中间产物
 ESP32/**/*.bin
