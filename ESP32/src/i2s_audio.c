@@ -177,12 +177,15 @@ void i2s_audio_loopback_test(float volume)
 
     uint32_t frames = I2S_AUDIO_FRAMES_PER_BUF;
 
-    /* 自动增益控制（AGC）状态：
-     * 根据麦克风峰值自动调整增益，避免削波同时最大化输出 */
-    int32_t agc_gain_q = 4096;          /* 初始 1.0x */
-    const int32_t agc_target = 12000;   /* 目标峰值（16-bit 满幅 32768 的 ~37%，约 -8.7dBFS，不刺耳） */
-    const int32_t agc_max = 8192;       /* 最大增益 2.0x */
-    const int32_t agc_min = 1024;       /* 最小增益 0.25x */
+    /* 自激啸叫抑制策略：
+     * 1. 噪声门限：帧峰值低于门限时输出静音（切断麦克风↔扬声器正反馈回路）
+     * 2. 保守 AGC：增益上限 1.0x，防止啸叫被逐级放大
+     * 3. 低默认音量 */
+    const int32_t noise_gate = 200;    /* 噪声门限：16-bit 有效值低于此视为噪声，输出静音 */
+    int32_t agc_gain_q = 4096;         /* 初始 1.0x */
+    const int32_t agc_target = 8000;   /* 目标峰值（约 -12dBFS） */
+    const int32_t agc_max = 8192;      /* 最大增益 2.0x */
+    const int32_t agc_min = 1024;      /* 最小增益 0.25x */
 
     while (1) {
         if (i2s_audio_read(rx_buf, frames) != ESP_OK) {
@@ -190,30 +193,43 @@ void i2s_audio_loopback_test(float volume)
             continue;
         }
 
-        /* 统计本帧峰值 */
+        /* 一次性诊断：打印 RX 原始数据，确认 16-bit 位宽下数据格式 */
+        static int diag_once;
+        if (diag_once < 3) {
+            diag_once++;
+            ESP_LOGI(TAG, "RX raw[0..3]: 0x%08X 0x%08X 0x%08X 0x%08X",
+                     (uint32_t)rx_buf[0], (uint32_t)rx_buf[1],
+                     (uint32_t)rx_buf[2], (uint32_t)rx_buf[3]);
+        }
+
+        /* 统计本帧峰值（RX 是 24-bit 左对齐，右移 8 位得到 16-bit 有效值） */
         int32_t frame_peak = 0;
         for (size_t i = 0; i < frames; i++) {
-            int32_t l = rx_buf[i * 2]; /* 16-bit 位宽：数据已在低 16 位（符号扩展） */
+            int32_t l = rx_buf[i * 2] >> 8; /* 24-bit 左对齐 → 16-bit 有效 */
             int32_t a = (l < 0) ? -l : l;
             if (a > frame_peak) frame_peak = a;
         }
 
-        /* 简单 AGC：峰值太低→增益增，峰值太高→增益减（慢速平滑） */
-        if (frame_peak > 0) {
-            if (frame_peak > agc_target) {
-                agc_gain_q -= 64; /* 峰值过高，降增益 */
-            } else if (frame_peak < (agc_target / 4)) {
-                agc_gain_q += 16; /* 峰值过低，升增益 */
-            }
-            if (agc_gain_q > agc_max) agc_gain_q = agc_max;
-            if (agc_gain_q < agc_min) agc_gain_q = agc_min;
+        /* 噪声门限：信号过弱则完全静音（消除自激啸叫的根源） */
+        if (frame_peak < noise_gate) {
+            i2s_audio_write(tx_buf, frames); /* tx_buf 全 0（static 初始为 0） */
+            continue;
         }
+
+        /* 保守 AGC */
+        if (frame_peak > agc_target) {
+            agc_gain_q -= 64;
+        } else if (frame_peak < (agc_target / 4)) {
+            agc_gain_q += 16;
+        }
+        if (agc_gain_q > agc_max) agc_gain_q = agc_max;
+        if (agc_gain_q < agc_min) agc_gain_q = agc_min;
 
         /* 应用 AGC + 用户音量，写入功放 */
         int64_t rms_acc = 0;
         int32_t peak = 0;
         for (size_t i = 0; i < frames; i++) {
-            int32_t l = rx_buf[i * 2];                    /* 16-bit 数据 */
+            int32_t l = rx_buf[i * 2] >> 8;              /* 24-bit 左对齐 → 16-bit */
             int32_t v = ((int64_t)l * vol_q * agc_gain_q) >> 24; /* 缩放 */
             if (v > 32767) v = 32767;
             if (v < -32768) v = -32768;

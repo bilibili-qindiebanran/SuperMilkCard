@@ -119,14 +119,12 @@ void app_main(void)
     }
     else
     {
-        ESP_LOGI(TAG, "I2S audio OK. Starting mic -> amp loopback (AGC auto-gain)...");
-        ESP_LOGI(TAG, "Note: SPKMODE(GPIO%d)=HIGH, amp gain = max (GAIN_SLOT 100k to GND).",
-                 I2S_AUDIO_SPKMODE);
-        /* 环回测试：麦克风 → 功放，含 AGC 自动增益防削波 */
-        i2s_audio_loopback_test(1.0f);
+        /* I2S 音频初始化成功，但不启用环回（避免啸叫）。
+         * 麦克风/功放已就绪，供后续功能使用。 */
+        ESP_LOGI(TAG, "I2S audio ready (mic + amp), loopback disabled.");
     }
 
-    /* 若音频初始化失败，回退到 IP5306 状态轮询 */
+    /* IP5306 状态轮询 */
     while (1)
     {
         print_status();
