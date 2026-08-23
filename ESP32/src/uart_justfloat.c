@@ -30,18 +30,21 @@ esp_err_t uart_justfloat_init(void)
         .source_clk = UART_SCLK_DEFAULT,
     };
     esp_err_t err = uart_driver_install(JUSTFLOAT_UART_NUM, 1024, 1024, 0, NULL, 0);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "uart_driver_install failed: %s", esp_err_to_name(err));
         return err;
     }
     err = uart_param_config(JUSTFLOAT_UART_NUM, &cfg);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "uart_param_config failed: %s", esp_err_to_name(err));
         return err;
     }
     err = uart_set_pin(JUSTFLOAT_UART_NUM, JUSTFLOAT_UART_TX, JUSTFLOAT_UART_RX,
                        UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "uart_set_pin failed: %s", esp_err_to_name(err));
         return err;
     }
@@ -52,7 +55,8 @@ esp_err_t uart_justfloat_init(void)
 
 void uart_justfloat_send(const float *data, size_t count)
 {
-    if (data == NULL || count == 0) {
+    if (data == NULL || count == 0)
+    {
         return;
     }
     /* 发送 float 数组（直接按字节发，小端） */

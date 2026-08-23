@@ -7,6 +7,9 @@
  *   WRITE: [Start][0xEA][REG][DATA][Stop]
  *   READ : [Start][0xEA][REG][Restart][0xEB][DATA][Stop]
  * 7 位从机地址 0x75，见 ip5306.h 与 docs/ip5306-i2c-通讯协议.md。
+ *
+ * I2C 总线：通过共享 i2c_bus 模块申请设备句柄（与触摸屏共用 I2C0），
+ * 不在本模块内创建总线。
  */
 
 #include "ip5306.h"
@@ -17,9 +20,10 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 
+#include "i2c_bus.h"
+
 static const char *TAG = "ip5306";
 
-static i2c_master_bus_handle_t s_bus = NULL;
 static i2c_master_dev_handle_t s_dev = NULL;
 
 esp_err_t ip5306_init(void)
@@ -28,33 +32,15 @@ esp_err_t ip5306_init(void)
         return ESP_OK; /* 已初始化 */
     }
 
-    i2c_master_bus_config_t bus_cfg = {
-        .i2c_port = I2C_NUM_0,
-        .sda_io_num = IP5306_PIN_SDA,
-        .scl_io_num = IP5306_PIN_SCL,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true, /* 方便验证；量产建议外部 2.2kΩ 上拉 */
-    };
-    esp_err_t err = i2c_new_master_bus(&bus_cfg, &s_bus);
+    /* 通过共享总线申请设备句柄（总线由 i2c_bus_init() 创建） */
+    esp_err_t err = i2c_bus_add_device(IP5306_SLAVE_ADDR, IP5306_I2C_CLK_HZ, &s_dev);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "i2c_new_master_bus failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "i2c_bus_add_device failed: %s", esp_err_to_name(err));
         return err;
     }
 
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = IP5306_SLAVE_ADDR, /* 0x75 */
-        .scl_speed_hz = IP5306_I2C_CLK_HZ,
-    };
-    err = i2c_master_bus_add_device(s_bus, &dev_cfg, &s_dev);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "i2c_master_bus_add_device failed: %s", esp_err_to_name(err));
-        return err;
-    }
-
-    ESP_LOGI(TAG, "IP5306 on I2C0 SDA=%d SCL=%d @ %d Hz, addr=0x%02X",
-             IP5306_PIN_SDA, IP5306_PIN_SCL, IP5306_I2C_CLK_HZ, IP5306_SLAVE_ADDR);
+    ESP_LOGI(TAG, "IP5306 on I2C0 (shared bus), addr=0x%02X @ %d Hz",
+             IP5306_SLAVE_ADDR, IP5306_I2C_CLK_HZ);
     return ESP_OK;
 }
 
@@ -64,9 +50,10 @@ esp_err_t ip5306_read_reg(uint8_t reg, uint8_t *val)
         return ESP_ERR_INVALID_STATE;
     }
     /* 静默失败（不打印日志）：轮询阶段频繁读取，失败日志会污染 JustFloat 串口流。
-     * 100ms 超时：IP5306 正常响应只需数微秒；用较大超时避免误判 NACK */
+     * 200ms 超时：正常响应只需数微秒；触摸屏共用 I2C0 总线时会占用总线，
+     * 需容忍等待总线锁释放，避免误判超时 */
     esp_err_t err = i2c_master_transmit_receive(
-        s_dev, &reg, 1, val, 1, pdMS_TO_TICKS(100));
+        s_dev, &reg, 1, val, 1, pdMS_TO_TICKS(200));
     return err;
 }
 
@@ -76,7 +63,7 @@ esp_err_t ip5306_write_reg(uint8_t reg, uint8_t val)
         return ESP_ERR_INVALID_STATE;
     }
     uint8_t buf[2] = { reg, val };
-    esp_err_t err = i2c_master_transmit(s_dev, buf, sizeof(buf), pdMS_TO_TICKS(100));
+    esp_err_t err = i2c_master_transmit(s_dev, buf, sizeof(buf), pdMS_TO_TICKS(200));
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "write reg 0x%02X failed: %s", reg, esp_err_to_name(err));
     }

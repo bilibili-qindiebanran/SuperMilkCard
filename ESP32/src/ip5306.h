@@ -36,11 +36,6 @@ extern "C" {
 
 #define IP5306_I2C_CLK_HZ 400000    /* I2C 时钟 400kHz（芯片支持上限） */
 #define IP5306_SLAVE_ADDR 0x75      /* 7 位从机地址 */
-#define IP5306_SLAVE_ADDR_WR 0xEA   /* 8 位写地址 */
-#define IP5306_SLAVE_ADDR_RD 0xEB   /* 8 位读地址 */
-#define IP5306_ACK_CHECK_EN true    /* 使能 I2C ACK 校验 */
-#define IP5306_ACK_VAL 0            /* ACK 应答值 */
-#define IP5306_NACK_VAL 1           /* NACK 应答值 */
 
 /* ------------------------------------------------------------------ */
 /* 寄存器地址定义（详见 docs/ip5306-i2c-通讯协议.md）                      */

@@ -12,8 +12,9 @@
  *    读共享缓存（IP5306 状态）+ 外部按键 + 麦克风 RMS/peak(dBFS)
  *    → 打包 JustFloat 帧 → UART0
  *
- *  任务3 屏幕刷新（帧同步 60Hz）：
- *    ST77926 QSPI 屏按帧刷新：TE 撕裂同步 → 绘制场景 → 整帧推上屏
+ *  任务3 屏幕刷新（10Hz 帧缓冲刷新）：
+ *    ST77926 QSPI 屏：全帧缓冲绘制 → lcd_ui_flush() 分块上屏
+ *    （TE 撕裂同步可通过 lcd_ui_wait_te() 启用，demo 暂未使用）
  *
  * JustFloat 帧（7 通道 float + 帧尾 0x00 0x00 0x80 0x7F）：
  *   ch1=charging  ch2=charge_full  ch3=light_load
@@ -30,11 +31,13 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "sdkconfig.h"
 
+#include "i2c_bus.h"
 #include "ip5306.h"
 #include "i2s_audio.h"
 #include "lcd_ui.h"
+#include "touch.h"
+#include "touch_test_ui.h"
 #include "uart_justfloat.h"
 
 static const char *TAG = "main";
@@ -201,35 +204,9 @@ static void justfloat_output_task(void *arg)
 }
 
 /* ================================================================== */
-/* 任务3：屏幕显示（官方组件 + 纯色/文字验证）                         */
+/* 任务3：屏幕显示（触摸测试 UI，替代原 Hello World demo）            */
+/* 触摸测试 UI 由 touch_test_ui_start() 创建独立任务，无需在此定义    */
 /* ================================================================== */
-static void lcd_demo_task(void *arg)
-{
-    (void)arg;
-    ESP_LOGI(TAG, "LCD demo task started (framebuffer mode)");
-
-    /* 深蓝背景 + 顶部色条 + Hello World + 帧计数，按帧刷新 */
-    uint16_t bg = LCD_UI_RGB565(0x10, 0x1A, 0x30);
-    int frame = 0;
-    while (1) {
-        lcd_ui_fill_screen(bg);
-
-        lcd_ui_fill_rect(0, 0, 320, 8, LCD_UI_RED);
-        lcd_ui_fill_rect(0, 8, 320, 16, LCD_UI_GREEN);
-        lcd_ui_fill_rect(0, 16, 320, 24, LCD_UI_BLUE);
-
-        lcd_ui_draw_string(56, 200, "Hello World!", LCD_UI_WHITE, bg);
-        lcd_ui_draw_string(32, 240, "SuperMilkCard ESP32-S3", LCD_UI_YELLOW, bg);
-
-        char buf[32];
-        snprintf(buf, sizeof(buf), "Frame %d", frame);
-        lcd_ui_draw_string(56, 280, buf, LCD_UI_CYAN, bg);
-
-        lcd_ui_flush(); /* 一次整屏刷新 */
-        frame++;
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-}
 
 /* ================================================================== */
 /* 启动辅助                                                           */
@@ -266,10 +243,18 @@ static void print_config_regs(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "IP5306-I2C comm test starting...");
+    ESP_LOGI(TAG, "SuperMilkCard ESP32-S3 starting...");
+
+    /* 0. 共享 I2C0 总线（IP5306 + 触摸屏共用，必须先初始化） */
+    esp_err_t err = i2c_bus_init();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "i2c_bus_init failed, abort");
+        return;
+    }
 
     /* 1. IP5306 初始化 + 在线检测 */
-    esp_err_t err = ip5306_init();
+    err = ip5306_init();
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "ip5306_init failed, abort");
@@ -318,27 +303,37 @@ void app_main(void)
 
     /* 4.6 ST77926 QSPI 屏幕初始化（乐鑫官方组件）+ 背光点亮 */
     ESP_LOGI(TAG, "--- ST77926 QSPI LCD init (official component) ---");
-    err = lcd_ui_init();
-    if (err != ESP_OK)
+    bool lcd_ok = (lcd_ui_init() == ESP_OK);
+    if (!lcd_ok)
     {
-        ESP_LOGE(TAG, "lcd_ui_init failed: %s (screen disabled)", esp_err_to_name(err));
+        ESP_LOGE(TAG, "lcd_ui_init failed (screen disabled)");
     }
     else
     {
-        err = lcd_ui_set_backlight(true);
-        if (err != ESP_OK)
+        esp_err_t bl_err = lcd_ui_set_backlight(true);
+        if (bl_err != ESP_OK)
         {
-            ESP_LOGE(TAG, "lcd_ui_set_backlight failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "lcd_ui_set_backlight failed: %s", esp_err_to_name(bl_err));
         }
         ESP_LOGI(TAG, "LCD ready (official component)");
     }
 
-    /* 5. 启动并行任务 */
-    xTaskCreatePinnedToCore(ip5306_poll_task, "ip5306_poll", 4096, NULL, 5, NULL, 1);
-    xTaskCreatePinnedToCore(justfloat_output_task, "justfloat_out", 4096, NULL, 6, NULL, 1);
-    if (err == ESP_OK)
+    /* 4.7 触摸屏初始化（共享 I2C0 总线，探测控制器） */
+    ESP_LOGI(TAG, "--- touch init ---");
+    err = touch_init();
+    if (err != ESP_OK)
     {
-        xTaskCreatePinnedToCore(lcd_demo_task, "lcd_demo", 4096, NULL, 4, NULL, 0);
+        ESP_LOGE(TAG, "touch_init failed: %s", esp_err_to_name(err));
+    }
+
+    /* 5. 启动并行任务
+     * 优先级：IP5306(7) > JustFloat(6) > touch_task(5) > touch_ui(4)
+     * IP5306 最高：保证电源轮询不被触摸高频 I2C 抢占导致超时 */
+    xTaskCreatePinnedToCore(ip5306_poll_task, "ip5306_poll", 4096, NULL, 7, NULL, 1);
+    xTaskCreatePinnedToCore(justfloat_output_task, "justfloat_out", 4096, NULL, 6, NULL, 1);
+    if (lcd_ok)
+    {
+        touch_test_ui_start(); /* 触摸测试 UI（替代原 lcd_demo） */
     }
 
     /* 主任务不再做事，挂起 */
