@@ -9,7 +9,13 @@
  *    中途失败不写部分数据；若上次未完成则跳过本次（防 I2C 冲突）
  *
  *  任务2 JustFloat 输出（快速 20ms / 50Hz）：
- *    读共享缓存（IP5306 状态）+ 麦克风 RMS/峰值 → 打包 JustFloat 帧 → UART0
+ *    读共享缓存（IP5306 状态）+ 按键计数 + 麦克风 RMS/peak(dBFS)
+ *    → 打包 JustFloat 帧 → UART0
+ *
+ * JustFloat 帧（8 通道 float + 帧尾 0x00 0x00 0x80 0x7F）：
+ *   ch1=charging  ch2=charge_full  ch3=light_load
+ *   ch4=麦克风 RMS(dBFS)  ch5=麦克风峰值(dBFS)
+ *   ch6=短按次数  ch7=长按次数  ch8=双击次数
  *
  * 串口分工：UART0(GPIO43/44)=JustFloat 二进制，USB-Serial/JTAG=日志
  */
@@ -33,6 +39,11 @@ static const char *TAG = "main";
 /* ================================================================== */
 static ip5306_status_t s_ip5306_cache;
 
+/* 按键事件累积计数（轮询任务累加，JustFloat 任务输出后清零） */
+static volatile uint32_t s_key_short_cnt = 0;
+static volatile uint32_t s_key_long_cnt = 0;
+static volatile uint32_t s_key_double_cnt = 0;
+
 /* IP5306 轮询任务状态机 */
 typedef enum {
     IP5306_STATE_IDLE,     /* 空闲，可发起新一轮读取 */
@@ -49,6 +60,7 @@ static void ip5306_poll_task(void *arg)
 {
     (void)arg;
     ESP_LOGI(TAG, "IP5306 poll task started (500ms interval)");
+    int diag = 0;
 
     while (1) {
         /* 状态机：仅 IDLE 状态允许发起读取，防止重入/冲突 */
@@ -56,12 +68,29 @@ static void ip5306_poll_task(void *arg)
             s_ip5306_state = IP5306_STATE_READING;
 
             ip5306_status_t st;
-            bool ok = (ip5306_get_status(&st) == ESP_OK);
+            esp_err_t err = ip5306_get_status(&st);
+            bool ok = (err == ESP_OK);
+
+            /* 诊断：前 5 次打印读取结果 */
+            if (diag < 5) {
+                diag++;
+                if (ok) {
+                    ESP_LOGI(TAG, "IP5306 poll OK: charging=%d full=%d light=%d",
+                             st.charging, st.charge_full, st.light_load);
+                } else {
+                    ESP_LOGE(TAG, "IP5306 poll failed: %s", esp_err_to_name(err));
+                }
+            }
 
             /* 无论成功失败都回到 IDLE，下次再试；失败则缓存保持旧值 */
             s_ip5306_state = IP5306_STATE_UPDATING;
             if (ok) {
                 s_ip5306_cache = st; /* 单写：仅此任务写 */
+
+                /* 按键事件累积计数（驱动已读后清零，这里累加避免漏事件） */
+                if (st.key_short) s_key_short_cnt++;
+                if (st.key_long) s_key_long_cnt++;
+                if (st.key_double) s_key_double_cnt++;
             }
             s_ip5306_state = IP5306_STATE_IDLE;
         }
@@ -105,15 +134,26 @@ static void justfloat_output_task(void *arg)
             if (mic_peak_db < -100.0f) mic_peak_db = -100.0f;
         }
 
-        float data[5] = {
+        /* 读取按键事件计数（轮询任务累加，此处读出后清零） */
+        uint32_t k_short = s_key_short_cnt;
+        uint32_t k_long = s_key_long_cnt;
+        uint32_t k_double = s_key_double_cnt;
+        s_key_short_cnt = 0;
+        s_key_long_cnt = 0;
+        s_key_double_cnt = 0;
+
+        float data[8] = {
             st.charging ? 1.0f : 0.0f,
             st.charge_full ? 1.0f : 0.0f,
             st.light_load ? 1.0f : 0.0f,
             mic_rms_db,
             mic_peak_db,
+            (float)k_short,
+            (float)k_long,
+            (float)k_double,
         };
         /* JustFloat 数据走 UART0（GPIO43/44 → VOFA+），日志仍走 USB */
-        uart_justfloat_send(data, 5);
+        uart_justfloat_send(data, 8);
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
