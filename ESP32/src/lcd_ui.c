@@ -4,7 +4,7 @@
  *
  * 架构：
  *   - 所有绘制写入 PSRAM 全帧缓冲（320x480x2 = 300KB）
- *   - lcd_ui_flush() 每帧一次整屏 draw_bitmap（单次 RAMWR 事务）
+ *   - lcd_ui_flush() 按行分块提交，并在复用 DMA 缓冲前等待传输完成
  *   - 避免碎片窗口写入/对齐问题/刷新闪烁
  *
  * 接线（platformio.ini）：
@@ -206,7 +206,7 @@ esp_err_t lcd_ui_draw_string(int x, int y, const char *s, uint16_t fg, uint16_t 
                 int px = cx + col;
                 int py = y + row;
                 if (px >= 0 && px < LCD_UI_W && py >= 0 && py < LCD_UI_H) {
-                    *fb_pixel(px, py) = ((glyph[row] >> (4 - col)) & 1) ? f : b;
+                    *fb_pixel(px, py) = ((glyph[row] >> (6 - col)) & 1) ? f : b;
                 }
             }
         }
@@ -228,11 +228,19 @@ esp_err_t lcd_ui_flush(void)
     }
     /* 分块：每块 16 行，从 PSRAM 搬到内部 RAM 再发送。
      * 官方驱动要求 x 起点/宽度 4 对齐（320 满足），且规避
-     * PSRAM 直接做 DMA 源触发 ESP32-S3 underflow。 */
+     * PSRAM 直接做 DMA 源触发 ESP32-S3 underflow。
+     *
+     * esp_lcd_panel_draw_bitmap() 的颜色数据通过 DMA 异步发送；
+     * s_fb_chunk 必须在传输结束后才可覆写。以空参数事务作为
+     * ESP-IDF 提供的队列同步屏障，等待当前分块完成。 */
     for (int y = 0; y < LCD_UI_H; y += FB_CHUNK_ROWS) {
         int rows = (LCD_UI_H - y) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (LCD_UI_H - y);
         memcpy(s_fb_chunk, &s_fb[y * LCD_UI_W], rows * LCD_UI_W * 2);
         esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, y, LCD_UI_W, y + rows, s_fb_chunk);
+        if (err != ESP_OK) {
+            return err;
+        }
+        err = esp_lcd_panel_io_tx_param(s_io, -1, NULL, 0);
         if (err != ESP_OK) {
             return err;
         }
