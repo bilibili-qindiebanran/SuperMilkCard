@@ -1,16 +1,13 @@
 /**
  * @file main.c
- * @brief IP5306-I2C 通讯验证主程序
+ * @brief IP5306-I2C 电源管理 + I2S 音频（麦克风/功放环回）测试主程序
  *
  * 流程：
- *  1. 初始化 I2C 总线并扫描从机地址（确认 0x75 在线）
- *  2. 读取电源状态（充电中/已充满/轻载/按键事件）
- *  3. 读取系统控制与充电配置寄存器，打印出厂值
- *  4. 循环定时刷新状态（观察按键事件）
+ *  1. 初始化 I2C 总线，检测 IP5306（地址 0x75）并读取电源状态
+ *  2. 初始化 I2S 音频（ICS-43434 麦克风 + MAX98357A 功放）
+ *  3. 环回测试：麦克风拾音 → 功放外放，打印音量指示
  *
- * 安全策略：本程序默认【只读】，不做任何寄存器写入，避免误动电源行为。······················
- * 如需写入，请使用 ip5306_read_modify_write()（见 ip5306.h），并按
- * "读 -> 改 -> 写"规范操作。下方附有注释掉的示例。
+ * IP5306 安全策略：默认【只读】，不做寄存器写入。
  */
 
 #include <stdio.h>
@@ -21,6 +18,7 @@
 #include "sdkconfig.h"
 
 #include "ip5306.h"
+#include "i2s_audio.h"
 
 static const char *TAG = "main";
 
@@ -112,18 +110,23 @@ void app_main(void)
     ESP_LOGI(TAG, "--- power status ---");
     print_status();
 
-#if 0 /* 写入示例（默认关闭）：按需启用，使用前确认对电源行为的影响 */
-    /* 例：使能按键关机功能（SYS_CTL0 bit0），保留其他位不变 */
-    ip5306_read_modify_write(IP5306_REG_SYS_CTL0,
-                             IP5306_CTL0_BIT_KEY_PWR_OFF,
-                             IP5306_CTL0_BIT_KEY_PWR_OFF);
-    /* 例：设置轻载自动关机时间为 16S（SYS_CTL2 bit3:2） */
-    ip5306_read_modify_write(IP5306_REG_SYS_CTL2,
-                             IP5306_CTL2_LIGHTLOAD_MASK,
-                             IP5306_CTL2_LIGHTLOAD_16S);
-#endif
+    /* 4. I2S 音频初始化（ICS-43434 麦克风 + MAX98357A 功放） */
+    ESP_LOGI(TAG, "--- I2S audio init ---");
+    err = i2s_audio_init();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "i2s_audio_init failed: %s, abort audio test.", esp_err_to_name(err));
+    }
+    else
+    {
+        ESP_LOGI(TAG, "I2S audio OK. Starting mic -> amp loopback (AGC auto-gain)...");
+        ESP_LOGI(TAG, "Note: SPKMODE(GPIO%d)=HIGH, amp gain = max (GAIN_SLOT 100k to GND).",
+                 I2S_AUDIO_SPKMODE);
+        /* 环回测试：麦克风 → 功放，含 AGC 自动增益防削波 */
+        i2s_audio_loopback_test(1.0f);
+    }
 
-    /* 4. 循环刷新状态 */
+    /* 若音频初始化失败，回退到 IP5306 状态轮询 */
     while (1)
     {
         print_status();
