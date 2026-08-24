@@ -21,10 +21,10 @@
 
 ## 项目定位
 
-- **Windows/**：基于 Electron 的跨平台 AI 聊天桌面应用 —— Live2D 形象 + 流式对话 + 语音交互，当前**已完整实现**。
-- **ESP32/**：嵌入式规划占位（如桌面端的小硬件伴侣），**当前未实现**，仅保留占位目录。
+- **Windows/**：基于 Electron 的跨平台 AI 聊天桌面应用 —— Live2D 形象 + 流式对话 + 语音交互 + ESP32 硬件伴侣连接，当前**已完整实现**。
+- **ESP32/**：与桌面端配套的嵌入式硬件伙伴（ESP32-S3）：ST77926 屏 + 触摸 + 语音采集/播放 + Wi-Fi 局域网通信，**已实现**。
 
-对接的 LLM 服务遵循 **OpenAI 兼容协议**（`/v1/chat/completions` 的 SSE 流式），因此可接入 DeepSeek / Moonshot / Ollama / 通义 / 本地 LLM 等。
+对接的 LLM 服务遵循 **OpenAI 兼容协议**（`/v1/chat/completions` 的 SSE 流式），因此可接入 DeepSeek / Moonshot / Ollama / 通义 / 本地 LLM 等；也可选择把对话核心交给 **AstrBot**（AstrAlive 插件，客户端 WebSocket 接入）。
 
 ## 功能特性
 
@@ -35,6 +35,9 @@
 - **上下文管理**：token 估算 + 超限滑动窗口裁剪（system 恒保留）。
 - **机器人人格**：内置元气 / 冷静 / 毒舌预设，可增改删。
 - **语音交互**：系统语音与云端 TTS / STT 双通道（含回退策略）。
+- **AstrBot 后端接入**：可选把对话核心交给 AstrBot（AstrAlive 插件，经 WebSocket），与内置 LLM 直接转发两种模式并存。
+- **ESP32 硬件伴侣**：UDP 局域网自动发现 + TCP 业务通道 + WebSocket 性能推送，实时把 Live2D 表情/动作/回复摘要同步到 ESP32 侧互动终端。
+- **性能监测**：采集 CPU / GPU / 内存使用率，可选通过 WebSocket 实时推送到 ESP32。
 - **主题**：浅色 / 深色切换，粉色主色调。
 
 > 更详尽的功能、配置、打包与安全说明见 [Windows/README.md](Windows/README.md)。
@@ -45,17 +48,21 @@
 SuperMilkCard/
 ├─ Windows/                         # Electron 桌面客户端（已实现）
 │  ├─ src/
-│  │  ├─ main/                      # 主进程：LLM 流式、TTS/STT、settings、live2d:// 协议与模型管理
+│  │  ├─ main/                      # 主进程：LLM 流式、AstrBot、TTS/STT、ESP32、性能监测、settings、live2d:// 协议
 │  │  ├─ preload/                   # contextBridge 暴露 window.api
 │  │  ├─ shared/                    # 主 / 渲染共享：类型、上下文裁剪、情绪解析
-│  │  └─ renderer/                  # Vue 渲染进程：聊天页、设置页、Live2D 舞台、语音
+│  │  └─ renderer/                  # Vue 渲染进程：聊天页、设置页、Live2D 舞台、语音、ESP32 状态
 │  ├─ build/                        # 打包图标等资源（必提交）
-│  ├─ docs/
-│  │  └─ PLAN.md                    # 产品/技术开发计划
+│  ├─ docs/                         # 开发计划 / 安全说明
 │  ├─ electron-builder.yml          # 打包配置
-│  ├─ package.json
-│  └─ README.md
-├─ ESP32/                           # 嵌入式（规划占位，暂只有 .gitkeep）
+│  └─ package.json
+├─ ESP32/                           # ESP32-S3 硬件伴侣（已实现，PlatformIO + ESP-IDF + LVGL）
+│  ├─ src/                          # 网络、UI 页面（home/chat/live2d/music/settings）、屏幕/触摸/音频/I2C
+│  ├─ components/                   # ST77926 屏幕、触摸 等组件
+│  ├─ docs/                         # 安装、调试、Live2D 移植、IP5306 协议等
+│  ├─ tools/                        # 桌面端联调脚本（TCP / Live2D / 崩溃监控）
+│  ├─ platformio.ini                # 构建/烧录配置（esp32-s3）
+│  └─ 接口文档.md                    # 桌面端 ↔ ESP32 局域网通信协议
 ├─ .gitignore
 └─ README.md
 ```
@@ -73,6 +80,9 @@ SuperMilkCard/
    ▼
 主进程 (main)
    ├─ llm.ts     → 外部 LLM（SSE 流式，拼装 Authorization）
+   ├─ astrbot.ts → AstrBot 插件（WebSocket，对话核心可选）
+   ├─ esp32.ts   → ESP32（TCP 发现/收发）
+   ├─ perfMonitor.ts → 系统性能采样（可选经 WebSocket 到 ESP32）
    ├─ tts.ts     → 外部 /audio/speech
    ├─ stt.ts     → 外部 /audio/transcriptions
    └─ settings.ts → userData/settings.json（API Key 仅存于此）
@@ -95,6 +105,16 @@ npm run dev        # 开发模式（HMR 热更新）
 ```
 
 首次运行在「设置」页填写 **LLM** 的 Base URL / API Key / 模型名，即可开始对话。完整使用与配置说明见 [Windows/README.md](Windows/README.md)。
+
+### ESP32 硬件伴侣
+
+```bash
+cd ESP32
+pio run --target upload   # 烧录固件（PlatformIO + ESP-IDF，板卡 esp32-s3-devkitc-1）
+pio device monitor        # 打开串口监视器
+```
+
+详细安装与调试见 [esp32-platform-安装指南.md](ESP32/docs/esp32-platform-安装指南.md) 与 [esp32-vscode调试指南.md](ESP32/docs/esp32-vscode调试指南.md)，桌面端 ↔ ESP32 的通信协议见 [接口文档.md](ESP32/接口文档.md)。
 
 ## 可用脚本
 
@@ -127,6 +147,9 @@ npm run dev        # 开发模式（HMR 热更新）
 
 - [Windows 端访问说明](Windows/README.md)
 - [产品与技术开发计划](Windows/docs/PLAN.md)
+- [ESP32 安装指南](ESP32/docs/esp32-platform-安装指南.md)
+- [ESP32 VSCode 调试](ESP32/docs/esp32-vscode调试指南.md)
+- [ESP32 ↔ 桌面端通信协议](ESP32/接口文档.md)
 
 ## 许可
 
