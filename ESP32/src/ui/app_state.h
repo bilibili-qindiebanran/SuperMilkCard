@@ -95,6 +95,39 @@ typedef struct {
     uint32_t updated_ms;     /* 更新时间戳 */
 } app_state_live2d_t;
 
+/* 语音互动模式（双模式） */
+typedef enum {
+    APP_MODE_NONE = 0,
+    APP_MODE_LIVE2D_LINK,   /* Live2D 局域网联动 */
+    APP_MODE_DIRECT_API,    /* 独立角色 API */
+} app_session_mode_t;
+
+/* 会话状态（双模式状态机，见 docs/双模式联网语音角色与智能家居实施计划.md §2.3） */
+typedef enum {
+    APP_SESSION_IDLE = 0,        /* 在模式选择页 */
+    APP_SESSION_LINK_CHECKING,   /* Live2D 连接预检中（≤5s） */
+    APP_SESSION_LINKED_IDLE,     /* Live2D 已联动，空闲 */
+    APP_SESSION_LINKED_LISTENING,/* Live2D 联动：录音中 */
+    APP_SESSION_LINKED_WAITING,  /* Live2D 联动：等待回复 */
+    APP_SESSION_LINKED_SPEAKING, /* Live2D 联动：播放回复音频 */
+    APP_SESSION_DIRECT_CHECKING, /* 独立模式预检中 */
+    APP_SESSION_DIRECT_IDLE,     /* 独立模式就绪 */
+    APP_SESSION_DIRECT_LISTENING,/* 独立模式：录音中 */
+    APP_SESSION_DIRECT_STT,      /* 独立模式：STT 中 */
+    APP_SESSION_DIRECT_LLM,      /* 独立模式：LLM 中 */
+    APP_SESSION_DIRECT_TTS,      /* 独立模式：TTS 中 */
+    APP_SESSION_ERROR,           /* 错误页（保留错误信息） */
+} app_session_state_t;
+
+/* 会话状态快照（语音互动） */
+typedef struct {
+    app_session_mode_t mode;   /* 当前模式 */
+    app_session_state_t state; /* 当前会话状态 */
+    int focus;                 /* 模式选择页聚焦项：0=Live2D 联动，1=独立角色 */
+    char error[64];            /* 最近错误信息（截断） */
+    uint32_t updated_ms;
+} app_state_session_t;
+
 /* 完整状态快照（UI 每帧读取） */
 typedef struct {
     app_state_power_t power;
@@ -104,6 +137,7 @@ typedef struct {
     app_state_chat_t chat;
     app_state_media_t media;
     app_state_live2d_t live2d;
+    app_state_session_t session;
 } app_state_t;
 
 /* ------------------------------------------------------------------ */
@@ -119,6 +153,12 @@ void app_state_publish_live2d(bool connected, app_expr_t expression, app_motion_
                               const char *message_preview);
 void app_state_publish_live2d_conn(bool connected);
 void app_state_publish_live2d_message(const char *message_preview);
+
+/* 会话状态（语音互动状态机） */
+void app_state_publish_session(app_session_mode_t mode, app_session_state_t state,
+                               const char *error);
+void app_state_publish_session_focus(int focus);
+void app_state_publish_session_error(const char *error);
 
 /* 表情/动作枚举 ↔ 协议字符串（解析失败回退 neutral/idle） */
 app_expr_t app_expr_from_str(const char *s);
