@@ -34,6 +34,14 @@ import {
   stop as perfStop,
   getLatest as getPerfLatest
 } from './services/perfMonitor'
+import {
+  astrbotEmitter,
+  connect as astrbotConnect,
+  disconnect as astrbotDisconnect,
+  getStatus as getAstrbotStatus,
+  sendMessage as astrbotSendMessage,
+  stop as astrbotStop
+} from './services/astrbot'
 
 const active = new Map<string, AbortController>()
 
@@ -192,6 +200,13 @@ export function registerIpc(): void {
   ipcMain.handle('perf:stop', () => perfStop())
   ipcMain.handle('perf:get-latest', () => getPerfLatest())
 
+  // AstrBot 连接
+  ipcMain.handle('astrbot:connect', () => astrbotConnect())
+  ipcMain.handle('astrbot:disconnect', () => astrbotDisconnect())
+  ipcMain.handle('astrbot:get-status', () => getAstrbotStatus())
+  ipcMain.handle('astrbot:send-message', (_e, req) => astrbotSendMessage(req))
+  ipcMain.on('astrbot:stop', () => astrbotStop())
+
   // 主进程 → 渲染进程 事件广播
   const broadcast = (channel: string, data: unknown): void => {
     for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, data)
@@ -203,4 +218,9 @@ export function registerIpc(): void {
   esp32Emitter.on('live2d-command', (c) => broadcast('esp32:live2d-command', c))
   esp32Emitter.on('error', (m) => broadcast('esp32:error', m))
   perfEmitter.on('sample', (s) => broadcast('perf:sample', s))
+  astrbotEmitter.on('status', (s) => broadcast('astrbot:status', s))
+  // 复用 llm:* 通道回推 AstrBot 流式结果，渲染层现有 onChunk/onDone/onError 无需改动
+  astrbotEmitter.on('chunk', (c) => broadcast('llm:chunk', c))
+  astrbotEmitter.on('done', (d) => broadcast('llm:done', d))
+  astrbotEmitter.on('error', (e) => broadcast('llm:error', e))
 }

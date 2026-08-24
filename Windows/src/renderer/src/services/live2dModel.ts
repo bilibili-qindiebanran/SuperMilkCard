@@ -837,6 +837,22 @@ export class Live2DController {
     this.applyTransform()
   }
 
+  /** 让模型注视舞台上的某个点（相对 canvas 左上角的坐标，与 PIXI 全局坐标一致）。
+   *  复用 pixi-live2d-display 内置的平滑注视控制器：它会结合眼球 + 头部角度朝向目标，
+   *  并通过 toModelPosition 正确换算缩放/平移后的模型坐标，远近只影响方向。 */
+  focus(clientX: number, clientY: number): void {
+    if (!this.model) return
+    this.model.focus(clientX, clientY)
+  }
+
+  /** 让模型恢复正视前方（注视目标回中，带平滑过渡）。 */
+  resetFocus(): void {
+    const focusController = (this.model?.internalModel as unknown as {
+      focusController?: { focus: (x: number, y: number, instant?: boolean) => void }
+    })?.focusController
+    focusController?.focus(0, 0)
+  }
+
   async setEmotion(emotion: string): Promise<void> {
     if (!this.model) return
     // 情绪文本/标签 → tierKey → 该模型实际表达式 id（来自表情文件特征识别）

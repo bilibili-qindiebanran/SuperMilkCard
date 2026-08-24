@@ -29,6 +29,10 @@ onMounted(() => {
     live2d.resize(wrap.clientWidth, wrap.clientHeight)
   })
   observer.observe(wrap)
+
+  // 全局追踪鼠标指针，让模型眼神跟随（移出窗口时正视前方）
+  window.addEventListener('mousemove', onWindowMouseMove)
+  window.addEventListener('mouseout', onWindowMouseOut)
 })
 
 // 等「设置加载完成」且「舞台已挂载」后再加载模型：
@@ -54,6 +58,30 @@ function getLocalPoint(e: MouseEvent | WheelEvent): { x: number; y: number } {
   if (!wrap) return { x: 0, y: 0 }
   const rect = wrap.getBoundingClientRect()
   return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+// 上次收到的指针坐标（仅用于跳过无变化的事件，降低高频触发）
+let lastFocusX = Number.NaN
+let lastFocusY = Number.NaN
+
+/** 全局追踪鼠标，让模型眼睛望向指针方向。坐标换算成相对 canvas 左上角（与 PIXI 全局坐标一致）。 */
+function onWindowMouseMove(e: MouseEvent): void {
+  if (live2d.status !== 'ready') return
+  const wrap = wrapRef.value
+  if (!wrap) return
+  const rect = wrap.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  if (x === lastFocusX && y === lastFocusY) return
+  lastFocusX = x
+  lastFocusY = y
+  live2d.focus(x, y)
+}
+
+/** 指针移出窗口时，模型恢复正视前方。 */
+function onWindowMouseOut(e: MouseEvent): void {
+  if (live2d.status !== 'ready') return
+  if (!e.relatedTarget) live2d.resetFocus()
 }
 
 function onWheel(e: WheelEvent): void {
@@ -91,6 +119,8 @@ function onPointerUp(e: PointerEvent): void {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mousemove', onWindowMouseMove)
+  window.removeEventListener('mouseout', onWindowMouseOut)
   observer?.disconnect()
   observer = null
   dragging = false

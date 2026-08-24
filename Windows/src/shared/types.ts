@@ -158,6 +158,41 @@ export interface Esp32SendResult {
   message?: string
 }
 
+/** AstrBot（AstrAlive 插件）连接配置 */
+export interface AstrbotConfig {
+  /** 是否把机器人核心处理交给 AstrBot */
+  enabled: boolean
+  /** AstrBot 插件所在主机 */
+  host: string
+  /** AstrBot 插件 WebSocket 端口 */
+  port: number
+  /** 会话 ID（留空由主进程自动生成并持久化） */
+  sessionId: string
+  /** AstrBot 中配置的人格 ID（可选，缺省用 AstrBot 默认人格） */
+  personaId: string
+}
+
+/** AstrBot 连接状态 */
+export type AstrbotConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error'
+
+export interface AstrbotStatus {
+  connected: boolean
+  state: AstrbotConnectionState
+  message: string
+}
+
+/** 渲染进程 → 主进程 的委托发送请求（sessionId 由主进程读取/生成，渲染层无需传） */
+export interface AstrbotSendRequest {
+  chatId: string
+  content: string
+  images?: ImageAttachment[]
+  /** 追加到插件端 system_prompt 末尾的情感/动作标签指令（如 live2d.emotionInstruction） */
+  systemPromptExtra?: string
+}
+
+export interface AstrbotSendResult {
+  ok: boolean
+  message?: string
 /** 发送到 ESP32 的 Live2D 状态（字段白名单，未知值由 ESP32 回退） */
 export interface Esp32Live2dState {
   /** 表情：neutral / happy / sad / angry / surprised / thinking */
@@ -213,6 +248,7 @@ export interface AppSettings {
   live2d: Live2dConfig
   esp32: Esp32Config
   perf: PerfConfig
+  astrbot: AstrbotConfig
   theme: ThemeMode
 }
 
@@ -263,6 +299,7 @@ export interface PublicAppSettings {
   live2d: Live2dConfig
   esp32: Esp32Config
   perf: PerfConfig
+  astrbot: AstrbotConfig
   theme: ThemeMode
 }
 
@@ -276,6 +313,7 @@ export interface SettingsPatch {
   live2d?: Live2dConfig
   esp32?: Partial<Esp32Config>
   perf?: Partial<PerfConfig>
+  astrbot?: Partial<AstrbotConfig>
   theme?: ThemeMode
 }
 
@@ -314,6 +352,7 @@ export function toPublicSettings(s: AppSettings): PublicAppSettings {
     live2d: s.live2d,
     esp32: s.esp32,
     perf: s.perf,
+    astrbot: s.astrbot,
     theme: s.theme
   }
 }
@@ -456,6 +495,14 @@ export interface RendererApi {
     getLatest(): Promise<PerfSample | null>
     onSample(cb: (s: PerfSample) => void): () => void
   }
+  astrbot: {
+    connect(): Promise<AstrbotStatus>
+    disconnect(): Promise<AstrbotStatus>
+    getStatus(): Promise<AstrbotStatus>
+    sendMessage(req: AstrbotSendRequest): Promise<AstrbotSendResult>
+    stop(): void
+    onStatus(cb: (s: AstrbotStatus) => void): () => void
+  }
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -530,6 +577,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
     intervalMs: 1000,
     metrics: ['cpu', 'memory'],
     pushOverWs: true
+  },
+  astrbot: {
+    enabled: false,
+    host: 'localhost',
+    port: 6199,
+    sessionId: '',
+    personaId: ''
   },
   theme: 'light'
 }

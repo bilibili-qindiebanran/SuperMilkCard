@@ -3,6 +3,7 @@ import type {
   ApiKeySection,
   ApiKeyTestRequest,
   ApiKeyTestResult,
+  AstrbotConfig,
   Esp32Config,
   Live2dConfig,
   PerfConfig,
@@ -61,6 +62,7 @@ export const useSettingsStore = defineStore('settings', {
     live2d: (s): Live2dConfig => s.data.live2d,
     esp32: (s): Esp32Config => s.data.esp32,
     perf: (s): PerfConfig => s.data.perf,
+    astrbot: (s): AstrbotConfig => s.data.astrbot,
     theme: (s): ThemeMode => s.data.theme
   },
   actions: {
