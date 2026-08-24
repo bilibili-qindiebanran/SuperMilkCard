@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, protocol } from 'electron'
+import { app, shell, BrowserWindow, protocol, session } from 'electron'
 import { join, extname } from 'path'
 import { readFile } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -94,6 +94,20 @@ function createWindow(): void {
 app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.supermilkcard.app')
+
+  // 麦克风权限：允许渲染层使用 getUserMedia（语音输入/网页 STT）。
+  // 仅放行 media 权限，其它敏感权限（如通知/定位/摄像头）保持默认拒绝。
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === 'media') {
+      callback(true)
+    } else {
+      callback(false)
+    }
+  })
+  // 处理媒体权限检查（部分平台走 checkHandler）
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    return permission === 'media'
+  })
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.

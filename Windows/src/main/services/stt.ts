@@ -41,11 +41,18 @@ export async function transcribe(req: SttTranscribeRequest): Promise<SttTranscri
   if (!apiKey) throw new Error('请先在设置中填写 API Key')
   if (!baseUrl) throw new Error('请先在设置中填写 Base URL')
 
-  // DashScope qwen-audio 系列：走 WebSocket 流式 ASR（16k PCM）
+  // DashScope qwen-audio 系列：走 WebSocket 流式 ASR
   if (model.includes('qwen-audio')) {
-    const wav = Buffer.from(req.audioBase64, 'base64')
-    const { pcm } = wavToPcm(wav)
-    const text = await transcribePcm(pcm, { apiKey, model, sampleRate: 16000, format: 'pcm' })
+    const audio = Buffer.from(req.audioBase64, 'base64')
+    const mimeType = (req.mimeType || '').toLowerCase()
+    // WAV → 提取 PCM（16k/16bit 单声道）；WebM/OPUS → 直接按 opus 上传（DashScope 支持）
+    if (mimeType.includes('wav') || mimeType.includes('pcm')) {
+      const { pcm } = wavToPcm(audio)
+      const text = await transcribePcm(pcm, { apiKey, model, sampleRate: 16000, format: 'pcm' })
+      return { text }
+    }
+    // WebM/OPUS：DashScope ASR 的 opus 格式接受原始字节流
+    const text = await transcribePcm(audio, { apiKey, model, sampleRate: 16000, format: 'opus' })
     return { text }
   }
 
