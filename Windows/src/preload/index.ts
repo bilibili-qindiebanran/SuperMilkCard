@@ -10,6 +10,8 @@ import type {
   ChatStreamRequest,
   EmotionClassifyItem,
   Esp32Device,
+  Esp32Live2dCommand,
+  Esp32Live2dState,
   Esp32SendResult,
   Esp32Status,
   Esp32TextMessage,
@@ -86,10 +88,13 @@ const api: RendererApi = {
     sendChat: (role: 'user' | 'assistant', content: string): Promise<Esp32SendResult> =>
       ipcRenderer.invoke('esp32:send-chat', role, content),
     sendTts: (text: string): Promise<Esp32SendResult> => ipcRenderer.invoke('esp32:send-tts', text),
+    sendLive2dState: (state: Esp32Live2dState): Promise<Esp32SendResult> =>
+      ipcRenderer.invoke('esp32:send-live2d-state', state),
     onStatus: (cb) => subscribe<Esp32Status>('esp32:status', cb),
     onDevices: (cb) => subscribe<Esp32Device[]>('esp32:devices', cb),
     onText: (cb) => subscribe<Esp32TextMessage>('esp32:text', cb),
     onVoiceText: (cb) => subscribe<Esp32VoiceTextMessage>('esp32:voice-text', cb),
+    onLive2dCommand: (cb) => subscribe<Esp32Live2dCommand>('esp32:live2d-command', cb),
     onError: (cb) => subscribe<{ message: string }>('esp32:error', cb)
   },
   perf: {

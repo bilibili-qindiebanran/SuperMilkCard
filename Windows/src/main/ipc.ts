@@ -6,6 +6,7 @@ import type {
   AppSettings,
   ChatStreamRequest,
   EmotionClassifyItem,
+  Esp32Live2dState,
   SettingsPatch,
   SttTranscribeRequest,
   TtsSynthesizeRequest
@@ -24,6 +25,7 @@ import {
   getStatus as getEsp32Status,
   listDevices,
   sendChat,
+  sendLive2dState,
   sendTts
 } from './services/esp32'
 import {
@@ -189,6 +191,9 @@ export function registerIpc(): void {
     sendChat(role, content)
   )
   ipcMain.handle('esp32:send-tts', (_e, text: string) => sendTts(text))
+  ipcMain.handle('esp32:send-live2d-state', (_e, state: Esp32Live2dState) =>
+    sendLive2dState(state)
+  )
 
   // 性能监测
   ipcMain.handle('perf:start', () => perfStart())
@@ -210,6 +215,7 @@ export function registerIpc(): void {
   esp32Emitter.on('devices', (d) => broadcast('esp32:devices', d))
   esp32Emitter.on('text', (m) => broadcast('esp32:text', m))
   esp32Emitter.on('voice-text', (m) => broadcast('esp32:voice-text', m))
+  esp32Emitter.on('live2d-command', (c) => broadcast('esp32:live2d-command', c))
   esp32Emitter.on('error', (m) => broadcast('esp32:error', m))
   perfEmitter.on('sample', (s) => broadcast('perf:sample', s))
   astrbotEmitter.on('status', (s) => broadcast('astrbot:status', s))

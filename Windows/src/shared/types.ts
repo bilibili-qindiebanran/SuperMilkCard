@@ -193,6 +193,19 @@ export interface AstrbotSendRequest {
 export interface AstrbotSendResult {
   ok: boolean
   message?: string
+/** 发送到 ESP32 的 Live2D 状态（字段白名单，未知值由 ESP32 回退） */
+export interface Esp32Live2dState {
+  /** 表情：neutral / happy / sad / angry / surprised / thinking */
+  expression: string
+  /** 动作：idle / speaking / listening / thinking / waving */
+  motion: string
+  /** 最新回复摘要（ESP32 侧截断 96 UTF-8 字节） */
+  messagePreview: string
+}
+
+/** ESP32 → 软件的 live2d 设备命令 */
+export interface Esp32Live2dCommand {
+  command: 'enter' | 'return_home' | 'reconnect'
 }
 
 export type ThemeMode = 'light' | 'dark'
@@ -466,10 +479,14 @@ export interface RendererApi {
     sendChat(role: 'user' | 'assistant', content: string): Promise<Esp32SendResult>
     /** 文本转语音后发送到 ESP32 */
     sendTts(text: string): Promise<Esp32SendResult>
+    /** 发送 Live2D 表情/动作/摘要状态到 ESP32 */
+    sendLive2dState(state: Esp32Live2dState): Promise<Esp32SendResult>
     onStatus(cb: (s: Esp32Status) => void): () => void
     onDevices(cb: (d: Esp32Device[]) => void): () => void
     onText(cb: (m: Esp32TextMessage) => void): () => void
     onVoiceText(cb: (m: Esp32VoiceTextMessage) => void): () => void
+    /** ESP32 互动页设备命令（enter / return_home / reconnect） */
+    onLive2dCommand(cb: (c: Esp32Live2dCommand) => void): () => void
     onError(cb: (m: { message: string }) => void): () => void
   }
   perf: {
