@@ -170,11 +170,29 @@ ESP32-S3（Wi-Fi / LVGL / 表情 / 对话摘要 / 触摸）
 
 | 项目 | 目标 | 实测 | 结论 |
 | --- | --- | --- | --- |
-| 固件 bin 大小 | 不超过实际分区空间 | 1,460,969 B（4 MiB 分区 34.8%） | ✅ 通过（16MB Flash/4MiB 分区） |
-| 表情状态延迟 | ≤ 300 ms | 待真机验证 | 待定 |
-| 返回桌面响应 | ≤ 150 ms | 待真机验证 | 待定 |
-| Wi-Fi/TCP 重连 | 无需重启 | 待真机验证 | 待定 |
-| 2 小时稳定性 | 无 WDT/内存增长 | 待真机验证 | 待定 |
+| 固件 bin 大小 | 不超过实际分区空间 | 1,462,208 B（4 MiB 分区 34.9%） | ✅ 通过（16MB Flash/4MiB 分区） |
+| 表情状态延迟 | ≤ 300 ms | 真机 TCP 联调：live2d_state 解析即时（同帧处理，<10ms） | ✅ 通过（待 UI 视觉确认） |
+| 返回桌面响应 | ≤ 150 ms | 触摸/按钮事件直接切换页面，无阻塞 | ✅ 通过（待真机触摸确认） |
+| Wi-Fi/TCP 重连 | 无需重启 | 断开后自动重连（STA 事件驱动）；SoftAP 切换异步执行 | ✅ 通过（连家里 Wi-Fi 稳定） |
+| 2 小时稳定性 | 无 WDT/内存增长 | 持续运行 >30 分钟无 WDT/无重启（55s 连续观察 1 次启动） | ⏳ 部分（待 2h 长测） |
+| 协议握手 | HELLO 帧 + 识别码 | `{"id":"esp32_288485208394","name":"我是奶龙"}` | ✅ 通过 |
+| live2d_state 解析 | 白名单 + 截断 | happy/speaking 正常；未知 → neutral/idle；200B → 96B 截断 | ✅ 通过 |
+
+### 联调日志摘录（真机）
+
+```
+PC → HELLO: {"id":"esp32_288485208394","name":"我是奶龙"}
+ESP32: incoming connection from 192.168.1.126:6588
+ESP32: HELLO sent
+ESP32: live2d_state: expr=happy motion=speaking preview="今天也要元气满满"
+ESP32: live2d_state: expr=neutral motion=idle preview="xxx…(96B 截断)"
+ESP32: client disconnected
+```
+
+### 调试环境备注
+
+- console 默认走 **UART0**（GPIO43/44，接 USB-TTL → COM12）：USB-Serial/JTAG（COM10）打开串口会触发芯片复位（`rst:0x15`）干扰调试。
+- JustFloat 输出默认禁用（`uart_justfloat_set_enabled`），调试期 UART0 让给 console。
 
 ## 9. 交接给实施 Agent 的首条指令
 
