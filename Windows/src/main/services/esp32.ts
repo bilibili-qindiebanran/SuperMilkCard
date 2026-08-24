@@ -213,6 +213,8 @@ function handleText(payload: Buffer): void {
       emitter.emit('text', { content: msg.content ?? '' })
       break
     case 'audio_start':
+    case 'voice_start':
+      /* voice_start 为 ESP32 语音上行（16k/1ch/16bit PCM），语义同 audio_start */
       audioMeta = {
         format: msg.format ?? 'pcm',
         sampleRate: msg.sampleRate ?? 16000,
@@ -222,6 +224,7 @@ function handleText(payload: Buffer): void {
       audioChunks = []
       break
     case 'audio_end':
+    case 'voice_end':
       void finalizeVoice()
       break
     case 'chat':
@@ -275,6 +278,17 @@ async function finalizeVoice(): Promise<void> {
   const pcm = Buffer.concat(audioChunks)
   audioChunks = []
   const wav = pcmToWav(pcm, meta.sampleRate, meta.channels, meta.bits)
+  // 调试：保存 ESP32 录音 WAV 供本地 STT 调试验证
+  try {
+    const { writeFile } = await import('fs/promises')
+    const { join } = await import('path')
+    const { tmpdir } = await import('os')
+    const p = join(tmpdir(), `esp32_mic_${Date.now()}.wav`)
+    await writeFile(p, wav)
+    console.log('[esp32] saved mic wav:', p, wav.length, 'bytes')
+  } catch {
+    /* 忽略保存失败 */
+  }
   try {
     const { text } = await transcribe({ audioBase64: wav.toString('base64'), mimeType: 'audio/wav' })
     if (text.trim()) emitter.emit('voice-text', { text: text.trim() })
