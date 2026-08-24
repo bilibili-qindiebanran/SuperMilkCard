@@ -476,3 +476,15 @@ esp_err_t net_tcp_send_live2d_command(const char *command)
              command ? command : "");
     return net_tcp_send_json(json);
 }
+
+esp_err_t net_tcp_send_audio(const uint8_t *data, uint32_t len)
+{
+    if (data == NULL || len == 0) return ESP_ERR_INVALID_ARG;
+    int fd = s_client_fd;
+    if (fd < 0) return ESP_ERR_NOT_FOUND;
+    if (xSemaphoreTake(s_send_lock, pdMS_TO_TICKS(100)) != pdTRUE)
+        return ESP_ERR_TIMEOUT;
+    esp_err_t err = send_frame(fd, FRAME_TYPE_AUDIO, data, len);
+    xSemaphoreGive(s_send_lock);
+    return err;
+}

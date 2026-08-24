@@ -35,6 +35,9 @@ esp_err_t net_tcp_send_json(const char *json);
 /** @brief 发送 live2d_command 命令（enter / return_home / reconnect） */
 esp_err_t net_tcp_send_live2d_command(const char *command);
 
+/** @brief 发送一帧二进制 AUDIO（0x03）到客户端；未连接返回 ESP_ERR_NOT_FOUND */
+esp_err_t net_tcp_send_audio(const uint8_t *data, uint32_t len);
+
 #ifdef __cplusplus
 }
 #endif

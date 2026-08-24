@@ -35,6 +35,7 @@
 #include "i2c_bus.h"
 #include "ip5306.h"
 #include "i2s_audio.h"
+#include "audio_voice.h"
 #include "lcd_ui.h"
 #include "touch.h"
 #include "touch_test_ui.h"
@@ -272,6 +273,8 @@ void app_main(void)
     else
     {
         ESP_LOGI(TAG, "I2S audio ready (mic), loopback disabled.");
+        /* 语音上行任务（录音 → Windows STT） */
+        audio_voice_init();
     }
 
     /* 4. UART0 JustFloat 初始化 */
