@@ -26,6 +26,7 @@
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "esp_lcd_st77926.h"
@@ -35,7 +36,17 @@ static const char *TAG = "lcd_ui";
 
 static esp_lcd_panel_handle_t s_panel = NULL;
 static esp_lcd_panel_io_handle_t s_io = NULL;
-static uint16_t *s_fb = NULL; /* 全帧缓冲（PSRAM） */
+static uint16_t *s_fb = NULL;
+static SemaphoreHandle_t s_te_sem = NULL;
+
+static void IRAM_ATTR lcd_te_isr_handler(void *arg)
+{
+    (void)arg;
+    if (s_te_sem == NULL) return;
+    BaseType_t high_task_wakeup = pdFALSE;
+    xSemaphoreGiveFromISR(s_te_sem, &high_task_wakeup);
+    if (high_task_wakeup) portYIELD_FROM_ISR();
+} /* 全帧缓冲（PSRAM） */
 
 /* ================================================================== */
 /* AW9364DNR 背光（EN 上升沿计数调光，保持高=20mA 满亮）             */
@@ -58,6 +69,13 @@ static void aw9364_backlight_off(void)
 static inline uint16_t lcd_swap16(uint16_t v)
 {
     return (uint16_t)((v >> 8) | (v << 8));
+}
+
+static esp_err_t lcd_ui_apply_rotation(void)
+{
+    esp_err_t err = esp_lcd_panel_swap_xy(s_panel, false);
+    if (err != ESP_OK) return err;
+    return esp_lcd_panel_mirror(s_panel, false, false);
 }
 
 /* ================================================================== */
@@ -84,9 +102,21 @@ esp_err_t lcd_ui_init(void)
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,
     };
     gpio_config(&in_cfg);
+    s_te_sem = xSemaphoreCreateBinary();
+    if (s_te_sem == NULL) return ESP_ERR_NO_MEM;
+    esp_err_t te_isr_err = gpio_install_isr_service(0);
+    if (te_isr_err != ESP_OK && te_isr_err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGW(TAG, "TE ISR service unavailable: %s", esp_err_to_name(te_isr_err));
+    }
+    te_isr_err = gpio_isr_handler_add(LCD_PIN_TE, lcd_te_isr_handler, NULL);
+    if (te_isr_err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "TE ISR handler unavailable: %s", esp_err_to_name(te_isr_err));
+    }
     aw9364_backlight_off();
     gpio_set_level(LCD_PIN_TP_RST, 1);
     gpio_set_level(LCD_PIN_RESET, 1);
@@ -138,6 +168,8 @@ esp_err_t lcd_ui_init(void)
         ESP_LOGE(TAG, "esp_lcd_panel_init failed: %s", esp_err_to_name(err));
         return err;
     }
+    err = lcd_ui_apply_rotation();
+    if (err != ESP_OK) return err;
     err = esp_lcd_panel_disp_on_off(s_panel, true);
     if (err != ESP_OK)
     {
@@ -146,17 +178,17 @@ esp_err_t lcd_ui_init(void)
     }
 
     /* 6. 全帧缓冲（优先 PSRAM，回退内部 RAM） */
-    s_fb = heap_caps_malloc(LCD_UI_W * LCD_UI_H * 2, MALLOC_CAP_SPIRAM);
+    s_fb = heap_caps_malloc(LCD_UI_PHYS_W * LCD_UI_PHYS_H * 2, MALLOC_CAP_SPIRAM);
     if (s_fb == NULL)
     {
-        s_fb = heap_caps_malloc(LCD_UI_W * LCD_UI_H * 2, MALLOC_CAP_8BIT);
+        s_fb = heap_caps_malloc(LCD_UI_PHYS_W * LCD_UI_PHYS_H * 2, MALLOC_CAP_8BIT);
     }
     if (s_fb == NULL)
     {
         ESP_LOGE(TAG, "no framebuffer available");
         return ESP_ERR_NO_MEM;
     }
-    ESP_LOGI(TAG, "framebuffer: %d bytes", LCD_UI_W * LCD_UI_H * 2);
+    ESP_LOGI(TAG, "framebuffer: %d bytes", LCD_UI_PHYS_W * LCD_UI_PHYS_H * 2);
 
     /* 7. 开背光 */
     aw9364_backlight_on();
@@ -170,7 +202,7 @@ esp_err_t lcd_ui_init(void)
 /* ================================================================== */
 static inline uint16_t *fb_pixel(int x, int y)
 {
-    return &s_fb[y * LCD_UI_W + x];
+    return &s_fb[y * LCD_UI_PHYS_W + x];
 }
 
 esp_err_t lcd_ui_fill_rect(int x0, int y0, int x1, int y1, uint16_t color)
@@ -181,8 +213,8 @@ esp_err_t lcd_ui_fill_rect(int x0, int y0, int x1, int y1, uint16_t color)
     }
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
-    if (x1 > LCD_UI_W) x1 = LCD_UI_W;
-    if (y1 > LCD_UI_H) y1 = LCD_UI_H;
+    if (x1 > LCD_UI_PHYS_W) x1 = LCD_UI_PHYS_W;
+    if (y1 > LCD_UI_PHYS_H) y1 = LCD_UI_PHYS_H;
     uint16_t c = lcd_swap16(color);
     for (int y = y0; y < y1; y++)
     {
@@ -197,7 +229,7 @@ esp_err_t lcd_ui_fill_rect(int x0, int y0, int x1, int y1, uint16_t color)
 
 esp_err_t lcd_ui_fill_screen(uint16_t color)
 {
-    return lcd_ui_fill_rect(0, 0, LCD_UI_W, LCD_UI_H, color);
+    return lcd_ui_fill_rect(0, 0, LCD_UI_PHYS_W, LCD_UI_PHYS_H, color);
 }
 
 esp_err_t lcd_ui_draw_string(int x, int y, const char *s, uint16_t fg, uint16_t bg)
@@ -223,7 +255,7 @@ esp_err_t lcd_ui_draw_string(int x, int y, const char *s, uint16_t fg, uint16_t 
             {
                 int px = cx + col;
                 int py = y + row;
-                if (px >= 0 && px < LCD_UI_W && py >= 0 && py < LCD_UI_H)
+                if (px >= 0 && px < LCD_UI_PHYS_W && py >= 0 && py < LCD_UI_PHYS_H)
                 {
                     *fb_pixel(px, py) = ((glyph[row] >> (6 - col)) & 1) ? f : b;
                 }
@@ -243,7 +275,7 @@ esp_err_t lcd_ui_draw_pixel(int x, int y, uint16_t color)
     {
         return ESP_ERR_INVALID_STATE;
     }
-    if (x >= 0 && x < LCD_UI_W && y >= 0 && y < LCD_UI_H)
+    if (x >= 0 && x < LCD_UI_PHYS_W && y >= 0 && y < LCD_UI_PHYS_H)
     {
         *fb_pixel(x, y) = lcd_swap16(color);
     }
@@ -330,8 +362,8 @@ esp_err_t lcd_ui_draw_crosshair(int x, int y, int r, uint16_t color)
 /* ================================================================== */
 /* 整屏刷新：按行分块经内部 RAM 发送（规避 PSRAM DMA underflow）      */
 /* ================================================================== */
-#define FB_CHUNK_ROWS 64 /* 每块 64 行 = 320*64*2 = 40KB，480/64=8 次事务 */
-static uint16_t s_fb_chunk[LCD_UI_W * FB_CHUNK_ROWS] __attribute__((aligned(4)));
+#define FB_CHUNK_ROWS 64
+static uint16_t s_fb_chunk[LCD_UI_PHYS_W * FB_CHUNK_ROWS] __attribute__((aligned(4)));
 
 esp_err_t lcd_ui_flush(void)
 {
@@ -346,11 +378,11 @@ esp_err_t lcd_ui_flush(void)
      * esp_lcd_panel_draw_bitmap() 的颜色数据通过 DMA 异步发送；
      * s_fb_chunk 必须在传输结束后才可覆写。以空参数事务作为
      * ESP-IDF 提供的队列同步屏障，等待当前分块完成。 */
-    for (int y = 0; y < LCD_UI_H; y += FB_CHUNK_ROWS)
+    for (int y = 0; y < LCD_UI_PHYS_H; y += FB_CHUNK_ROWS)
     {
-        int rows = (LCD_UI_H - y) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (LCD_UI_H - y);
-        memcpy(s_fb_chunk, &s_fb[y * LCD_UI_W], rows * LCD_UI_W * 2);
-        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, y, LCD_UI_W, y + rows, s_fb_chunk);
+        int rows = (LCD_UI_PHYS_H - y) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (LCD_UI_PHYS_H - y);
+        memcpy(s_fb_chunk, &s_fb[y * LCD_UI_PHYS_W], rows * LCD_UI_PHYS_W * 2);
+        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, y, LCD_UI_PHYS_W, y + rows, s_fb_chunk);
         if (err != ESP_OK)
         {
             return err;
@@ -364,6 +396,72 @@ esp_err_t lcd_ui_flush(void)
     return ESP_OK;
 }
 
+/* ================================================================== */
+/* 局部刷新：紧凑 LVGL 逻辑区域 → 旋转 → 4 像素对齐 → 分块 DMA 发送      */
+/* ================================================================== */
+esp_err_t lcd_ui_flush_area(int x0, int y0, int x1, int y1, const void *data)
+{
+    if (s_panel == NULL || data == NULL)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* data 是由 LVGL 提供的紧凑逻辑区域，行跨度等于 x1 - x0。 */
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > LCD_UI_W) x1 = LCD_UI_W;
+    if (y1 > LCD_UI_H) y1 = LCD_UI_H;
+    if (x0 >= x1 || y0 >= y1)
+    {
+        return ESP_OK;
+    }
+
+    /* ST77926 QSPI 要求窗口 X 起点和宽度按 4 像素对齐。完整帧源数据
+     * 覆盖对齐扩展出的列，因此可以安全读取 dx0..dx1。 */
+    int dx0 = (LCD_UI_PHYS_W - y1) & ~3;
+    int dx1 = (LCD_UI_PHYS_W - y0 + 3) & ~3;
+    if (dx1 > LCD_UI_PHYS_W)
+    {
+        dx1 = LCD_UI_PHYS_W;
+    }
+    int py0 = x0;
+    int py1 = x1;
+    int width = dx1 - dx0;
+    int src_width = x1 - x0;
+    const uint16_t *src = (const uint16_t *)data;
+
+    for (int py = py0; py < py1; py += FB_CHUNK_ROWS)
+    {
+        int rows = (py1 - py) > FB_CHUNK_ROWS ? FB_CHUNK_ROWS : (py1 - py);
+        for (int row = 0; row < rows; row++)
+        {
+            const int logical_x = py + row;
+            uint16_t *dst_row = &s_fb_chunk[row * width];
+            for (int col = 0; col < width; col++)
+            {
+                const int logical_y = LCD_UI_PHYS_W - 1 - (dx0 + col);
+                int src_y = logical_y;
+                if (src_y < y0) src_y = y0;
+                if (src_y >= y1) src_y = y1 - 1;
+                dst_row[col] = lcd_swap16(src[(size_t)(src_y - y0) * src_width + logical_x - x0]);
+            }
+        }
+
+        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, dx0, py, dx1, py + rows, s_fb_chunk);
+        if (err != ESP_OK)
+        {
+            return err;
+        }
+        /* 颜色事务由 DMA 异步执行，复用 s_fb_chunk 前必须等待传输结束。 */
+        err = esp_lcd_panel_io_tx_param(s_io, -1, NULL, 0);
+        if (err != ESP_OK)
+        {
+            return err;
+        }
+    }
+
+    return ESP_OK;
+}
 esp_err_t lcd_ui_draw_bitmap(int x0, int y0, int x1, int y1, const void *data)
 {
     if (s_panel == NULL)
@@ -389,20 +487,10 @@ esp_err_t lcd_ui_set_backlight(bool on)
 /* 等待 TE 帧同步（超时放行） */
 esp_err_t lcd_ui_wait_te(uint32_t timeout_ms)
 {
-    static int last = -1;
-    TickType_t start = xTaskGetTickCount();
-    while (1)
-    {
-        int lvl = gpio_get_level(LCD_PIN_TE);
-        if (lvl != last)
-        {
-            last = lvl;
-            return ESP_OK;
-        }
-        if ((xTaskGetTickCount() - start) >= pdMS_TO_TICKS(timeout_ms))
-        {
-            return ESP_ERR_TIMEOUT;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
+    if (s_te_sem == NULL) return ESP_ERR_INVALID_STATE;
+
+    while (xSemaphoreTake(s_te_sem, 0) == pdTRUE) {}
+    return xSemaphoreTake(s_te_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE
+               ? ESP_OK
+               : ESP_ERR_TIMEOUT;
 }

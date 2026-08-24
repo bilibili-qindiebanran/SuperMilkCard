@@ -4,6 +4,7 @@ import { createSocket, type Socket as UdpSocket } from 'dgram'
 import type {
   Esp32Config,
   Esp32Device,
+  Esp32Live2dState,
   Esp32SendResult,
   Esp32Status,
   Esp32ConnectionState
@@ -226,6 +227,13 @@ function handleText(payload: Buffer): void {
     case 'chat':
       emitter.emit('text', { content: msg.content ?? '' })
       break
+    case 'live2d_command': {
+      const command = (msg as { command?: string }).command
+      if (command === 'enter' || command === 'return_home' || command === 'reconnect') {
+        emitter.emit('live2d-command', { command })
+      }
+      break
+    }
     default:
       emitter.emit('text', { content: msg.content ?? payload.toString('utf-8') })
   }
@@ -310,6 +318,24 @@ function discover(): Esp32Device[] {
   return listDevices()
 }
 
+/**
+ * 发送 Live2D 状态到 ESP32（live2d_state 帧）。
+ * 字段白名单：expression/motion 未知值由 ESP32 回退 neutral/idle；
+ * messagePreview 由 ESP32 截断 96 UTF-8 字节。
+ */
+function sendLive2dState(state: Esp32Live2dState): Esp32SendResult {
+  if (!socket || status.state !== 'connected') return { ok: false, message: 'ESP32 未连接' }
+  socket.write(
+    encodeTextFrame({
+      type: 'live2d_state',
+      expression: state.expression,
+      motion: state.motion,
+      messagePreview: state.messagePreview
+    })
+  )
+  return { ok: true }
+}
+
 /* ---------------- 导出 ---------------- */
 
 export {
@@ -321,5 +347,6 @@ export {
   listDevices,
   resolveTarget,
   sendChat,
-  sendTts
+  sendTts,
+  sendLive2dState
 }

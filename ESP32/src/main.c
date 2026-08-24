@@ -38,12 +38,17 @@
 #include "lcd_ui.h"
 #include "touch.h"
 #include "touch_test_ui.h"
+#include "network/net_app.h"
+#include "ui/app_state.h"
+#include "ui_app.h"
 #include "uart_justfloat.h"
 
 static const char *TAG = "main";
 
 /* ================================================================== */
-/* 外部按键（IO38 / IO4，外部 10k 上拉，按下下拉=低电平）              */
+/* 外部按键（IO38 / IO4）                                              */
+/* 初始化由 board_keys 模块接管（ui_port_input 调用）；此处仅保留      */
+/* 原始电平读取给 JustFloat 通道（ch6/ch7）                            */
 /* ================================================================== */
 #ifndef KEY1_GPIO
 #define KEY1_GPIO 38
@@ -52,35 +57,10 @@ static const char *TAG = "main";
 #define KEY2_GPIO 4
 #endif
 
-static void key_gpio_init(void)
-{
-    /* 外部已有 10k 上拉，仅配输入模式（不上拉不下拉，避免干扰外部上拉） */
-    gpio_config_t io = {
-        .pin_bit_mask = (1ULL << KEY1_GPIO) | (1ULL << KEY2_GPIO),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&io);
-    ESP_LOGI(TAG, "Key GPIOs ready: KEY1=GPIO%d KEY2=GPIO%d (10k ext pullup, press=low)",
-             KEY1_GPIO, KEY2_GPIO);
-}
-
-/* 读取按键：低电平=按下 → 返回 1 */
+/* 读取按键原始电平：低=按下 → 返回 1 */
 static inline int key_read(int gpio)
 {
     return (gpio_get_level(gpio) == 0) ? 1 : 0;
-}
-
-/* 诊断：打印两个按键 GPIO 原始电平 */
-static void key_diag(void)
-{
-    static int n;
-    if (n++ < 10) {
-        ESP_LOGI(TAG, "key diag: IO38=%d IO4=%d (高=未按, 低=按下)",
-                 gpio_get_level(KEY1_GPIO), gpio_get_level(KEY2_GPIO));
-    }
 }
 
 /* ================================================================== */
@@ -185,7 +165,6 @@ static void justfloat_output_task(void *arg)
         /* 读取外部按键状态（GPIO 实时电平，按下=1） */
         int key1 = key_read(KEY1_GPIO);
         int key2 = key_read(KEY2_GPIO);
-        key_diag();
 
         float data[7] = {
             st.charging ? 1.0f : 0.0f,
@@ -198,6 +177,10 @@ static void justfloat_output_task(void *arg)
         };
         /* JustFloat 数据走 UART0（GPIO43/44 → VOFA+），日志仍走 USB */
         uart_justfloat_send(data, 7);
+
+        /* 发布到 app_state（UI 读取） */
+        app_state_publish_power(st.charging, st.charge_full, st.light_load);
+        app_state_publish_audio(mic_rms_db, mic_peak_db);
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -298,9 +281,6 @@ void app_main(void)
         ESP_LOGE(TAG, "uart_justfloat_init failed: %s", esp_err_to_name(err));
     }
 
-    /* 4.5 外部按键 GPIO 初始化（IO38 / IO4） */
-    key_gpio_init();
-
     /* 4.6 ST77926 QSPI 屏幕初始化（乐鑫官方组件）+ 背光点亮 */
     ESP_LOGI(TAG, "--- ST77926 QSPI LCD init (official component) ---");
     bool lcd_ok = (lcd_ui_init() == ESP_OK);
@@ -326,6 +306,14 @@ void app_main(void)
         ESP_LOGE(TAG, "touch_init failed: %s", esp_err_to_name(err));
     }
 
+    /* 4.8 网络：NVS + Wi-Fi（STA/配网）+ TCP 服务端 + 设备发现 */
+    ESP_LOGI(TAG, "--- network init ---");
+    err = net_app_start();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "net_app_start failed: %s", esp_err_to_name(err));
+    }
+
     /* 5. 启动并行任务
      * 优先级：IP5306(7) > JustFloat(6) > touch_task(5) > touch_ui(4)
      * IP5306 最高：保证电源轮询不被触摸高频 I2C 抢占导致超时 */
@@ -333,7 +321,9 @@ void app_main(void)
     xTaskCreatePinnedToCore(justfloat_output_task, "justfloat_out", 4096, NULL, 6, NULL, 1);
     if (lcd_ok)
     {
-        touch_test_ui_start(); /* 触摸测试 UI（替代原 lcd_demo） */
+        /* 阶段2：临时切到 LVGL 产品 UI（验证显示端口），
+         * 触摸测试 UI 保留为诊断工具（touch_test_ui.h 仍可手动调用） */
+        ui_app_start();
     }
 
     /* 主任务不再做事，挂起 */

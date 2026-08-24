@@ -1,0 +1,5 @@
+# SuperMilkCard 16MB flash, single 4MB app partition
+# nvs 64KB + phy_init 4KB + factory app 4MB; remaining flash is reserved
+nvs,      data, nvs,     ,        0x10000,
+phy_init, data, phy,     ,        0x1000,
+factory,  app,  factory, ,        0x400000,

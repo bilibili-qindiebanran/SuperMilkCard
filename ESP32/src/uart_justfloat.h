@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -32,6 +34,12 @@ extern "C" {
  * @return ESP_OK 成功
  */
 esp_err_t uart_justfloat_init(void);
+
+/**
+ * @brief 启用/禁用 JustFloat 输出（默认禁用，便于把 UART0 让给调试日志）
+ * @param enabled true=发送 JustFloat 帧；false=静默（不占用总线）
+ */
+void uart_justfloat_set_enabled(bool enabled);
 
 /**
  * @brief 发送一帧 JustFloat 数据（N 个 float + 帧尾）

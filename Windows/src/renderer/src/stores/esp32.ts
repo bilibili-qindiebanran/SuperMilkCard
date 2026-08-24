@@ -1,5 +1,10 @@
 import { defineStore } from 'pinia'
-import type { Esp32Device, Esp32Status } from '@shared/types'
+import type {
+  Esp32Device,
+  Esp32Live2dCommand,
+  Esp32Live2dState,
+  Esp32Status
+} from '@shared/types'
 
 export const useEsp32Store = defineStore('esp32', {
   state: () => ({
@@ -8,7 +13,9 @@ export const useEsp32Store = defineStore('esp32', {
     lastText: '',
     voiceText: '',
     voiceTextVersion: 0,
-    error: ''
+    error: '',
+    /** 最近一条来自 ESP32 的互动页命令（enter / return_home / reconnect） */
+    lastLive2dCommand: null as Esp32Live2dCommand | null
   }),
   getters: {
     connected: (s): boolean => s.status.connected
@@ -27,6 +34,9 @@ export const useEsp32Store = defineStore('esp32', {
       window.api.esp32.onVoiceText((m) => {
         this.voiceText = m.text
         this.voiceTextVersion += 1
+      })
+      window.api.esp32.onLive2dCommand((c) => {
+        this.lastLive2dCommand = c
       })
       window.api.esp32.onError((m) => {
         this.error = m.message
@@ -59,6 +69,13 @@ export const useEsp32Store = defineStore('esp32', {
     async sendTts(text: string): Promise<void> {
       if (!this.connected) return
       const res = await window.api.esp32.sendTts(text)
+      if (!res.ok && res.message) this.error = res.message
+    },
+
+    /** 发送 Live2D 表情/动作/摘要状态；未连接时静默失败 */
+    async sendLive2dState(state: Esp32Live2dState): Promise<void> {
+      if (!this.connected) return
+      const res = await window.api.esp32.sendLive2dState(state)
       if (!res.ok && res.message) this.error = res.message
     }
   }
