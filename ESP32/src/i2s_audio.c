@@ -27,6 +27,9 @@ static const char *TAG = "i2s_audio";
 static i2s_chan_handle_t s_tx = NULL; /* MAX98357A 功放 */
 static i2s_chan_handle_t s_rx = NULL; /* ICS-43434 麦克风 */
 
+/* I2S 读取互斥：JustFloat 轮询与语音录音并发读同一 RX 通道，需串行化 */
+static SemaphoreHandle_t s_rx_lock;
+
 /* SPKMODE 脚配置：拉高（默认增益档，MAX98357A 手册 GAIN_SLOT=VDD 时增益 9dB 且 L+R 混合） */
 static void spkmode_init(void)
 {
@@ -120,6 +123,12 @@ esp_err_t i2s_audio_init(void)
         return err;
     }
 
+    s_rx_lock = xSemaphoreCreateMutex();
+    if (s_rx_lock == NULL) {
+        ESP_LOGE(TAG, "rx_lock create failed");
+        return ESP_ERR_NO_MEM;
+    }
+
     ESP_LOGI(TAG, "I2S audio ready: BCLK=%d WS=%d DIN(mic)=%d DOUT(amp)=%d @ %d Hz",
              I2S_AUDIO_BCLK, I2S_AUDIO_WS, I2S_AUDIO_DIN, I2S_AUDIO_DOUT,
              I2S_AUDIO_SAMPLE_RATE);
@@ -131,10 +140,15 @@ esp_err_t i2s_audio_read(int32_t *buf, size_t frames)
     if (s_rx == NULL || buf == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    /* 串行化：JustFloat 轮询与语音录音并发读同一 RX 通道 */
+    if (s_rx_lock && xSemaphoreTake(s_rx_lock, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
     size_t bytes_read = 0;
     /* 非阻塞读取：DMA 有数据立即返回，无数据立即超时（不拖慢 JustFloat 轮询） */
     esp_err_t err = i2s_channel_read(s_rx, buf, frames * sizeof(int32_t), &bytes_read,
                                      pdMS_TO_TICKS(5));
+    if (s_rx_lock) xSemaphoreGive(s_rx_lock);
     if (err != ESP_OK) {
         return err; /* 不打印日志，避免污染串口 */
     }

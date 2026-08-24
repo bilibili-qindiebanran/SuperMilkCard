@@ -23,7 +23,6 @@
 #define AUDIO_VOICE_DECIMATION 3      /* 48k → 16k */
 #define AUDIO_VOICE_CHUNK_FRAMES 480  /* 每次读 480 帧 I2S（=10ms 48k） */
 #define AUDIO_VOICE_CHUNK_OUT 160     /* 抽取后 160 采样（=10ms 16k） */
-#define AUDIO_VOICE_FRAG_BYTES 8192   /* 每帧 AUDIO 负载字节 */
 #define AUDIO_VOICE_16K 16000
 
 static const char *TAG = AUDIO_VOICE_TAG;
@@ -31,15 +30,17 @@ static const char *TAG = AUDIO_VOICE_TAG;
 static TaskHandle_t s_task;
 static volatile bool s_recording;
 
+/* 大缓冲放静态区，避免任务栈溢出（栈仅保留控制量） */
+static uint8_t s_frag[AUDIO_VOICE_FRAG_BYTES];
+
 /* 录音任务 */
 static void voice_task(void *arg)
 {
     (void)arg;
     ESP_LOGI(TAG, "voice task started");
 
-    int32_t in[AUDIO_VOICE_CHUNK_FRAMES * 2];        /* 48k 32-bit 立体声 */
-    int16_t out[AUDIO_VOICE_CHUNK_OUT];              /* 抽取后 16-bit 单声道 */
-    uint8_t frag[AUDIO_VOICE_FRAG_BYTES];
+    int32_t in[AUDIO_VOICE_CHUNK_FRAMES * 2];        /* 48k 32-bit 立体声（3840B） */
+    int16_t out[AUDIO_VOICE_CHUNK_OUT];              /* 抽取后 16-bit 单声道（320B） */
     uint32_t frag_len = 0;
     uint32_t total_ms = 0;
 
@@ -79,19 +80,19 @@ static void voice_task(void *arg)
 
             /* 累积到分片，满 8KB 发一帧 */
             uint32_t out_bytes = sizeof(out);
-            if (frag_len + out_bytes > sizeof(frag))
+            if (frag_len + out_bytes > sizeof(s_frag))
             {
                 if (frag_len > 0)
                 {
-                    net_tcp_send_audio(frag, frag_len);
+                    net_tcp_send_audio(s_frag, frag_len);
                     frag_len = 0;
                 }
             }
-            memcpy(frag + frag_len, out, out_bytes);
+            memcpy(s_frag + frag_len, out, out_bytes);
             frag_len += out_bytes;
             if (frag_len >= AUDIO_VOICE_FRAG_BYTES)
             {
-                net_tcp_send_audio(frag, frag_len);
+                net_tcp_send_audio(s_frag, frag_len);
                 frag_len = 0;
             }
 
@@ -107,7 +108,7 @@ static void voice_task(void *arg)
         /* 发送剩余 + voice_end */
         if (frag_len > 0)
         {
-            net_tcp_send_audio(frag, frag_len);
+            net_tcp_send_audio(s_frag, frag_len);
         }
         net_tcp_send_json("{\"type\":\"voice_end\"}");
         ESP_LOGI(TAG, "recording stop, sent %u ms", (unsigned)total_ms);
@@ -136,7 +137,8 @@ bool audio_voice_is_recording(void)
 esp_err_t audio_voice_init(void)
 {
     if (s_task) return ESP_OK;
-    if (xTaskCreate(voice_task, "audio_voice", 4096, NULL, 4, &s_task) != pdPASS)
+    /* 栈 8KB：in(3.8KB)+out(0.3KB)+调用开销；frag 已移静态区 */
+    if (xTaskCreate(voice_task, "audio_voice", 8192, NULL, 4, &s_task) != pdPASS)
         return ESP_ERR_NO_MEM;
     return ESP_OK;
 }

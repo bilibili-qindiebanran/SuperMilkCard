@@ -37,6 +37,9 @@ esp_err_t audio_voice_init(void);
 /** @brief 录音最长时长（秒），超时自动停止（默认 10s） */
 #define AUDIO_VOICE_MAX_SEC 10
 
+/** @brief 分片负载字节（每帧 AUDIO） */
+#define AUDIO_VOICE_FRAG_BYTES 4096
+
 #ifdef __cplusplus
 }
 #endif
