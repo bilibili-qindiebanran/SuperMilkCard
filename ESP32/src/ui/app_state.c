@@ -90,6 +90,100 @@ void app_state_publish_media(bool has_source, bool playing, const char *title, c
     portEXIT_CRITICAL(&s_lock);
 }
 
+/* ------------------------------------------------------------------ */
+/* Live2D 快照                                                         */
+/* ------------------------------------------------------------------ */
+
+/* 表情白名单（协议单一事实来源见 ESP32/接口文档.md §6.5） */
+static const char *const s_expr_names[APP_EXPR_COUNT] = {
+    "neutral", "happy", "sad", "angry", "surprised", "thinking",
+};
+
+/* 动作白名单 */
+static const char *const s_motion_names[APP_MOTION_COUNT] = {
+    "idle", "speaking", "listening", "thinking", "waving",
+};
+
+app_expr_t app_expr_from_str(const char *s)
+{
+    if (s)
+    {
+        for (int i = 0; i < APP_EXPR_COUNT; i++)
+        {
+            if (strcmp(s_expr_names[i], s) == 0) return (app_expr_t)i;
+        }
+    }
+    return APP_EXPR_NEUTRAL;
+}
+
+app_motion_t app_motion_from_str(const char *s)
+{
+    if (s)
+    {
+        for (int i = 0; i < APP_MOTION_COUNT; i++)
+        {
+            if (strcmp(s_motion_names[i], s) == 0) return (app_motion_t)i;
+        }
+    }
+    return APP_MOTION_IDLE;
+}
+
+const char *app_expr_to_str(app_expr_t e)
+{
+    return (e >= 0 && e < APP_EXPR_COUNT) ? s_expr_names[e] : s_expr_names[APP_EXPR_NEUTRAL];
+}
+
+const char *app_motion_to_str(app_motion_t m)
+{
+    return (m >= 0 && m < APP_MOTION_COUNT) ? s_motion_names[m] : s_motion_names[APP_MOTION_IDLE];
+}
+
+/* 截断到 max_bytes 字节（不拆断 UTF-8 字符，末尾补 '\0'）。
+ * 仅用于 ASCII/UTF-8 多字节文本的显示安全截断。 */
+static void truncate_utf8(char *dst, size_t cap, const char *src, size_t max_bytes)
+{
+    if (!dst || cap == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+
+    size_t len = strlen(src);
+    if (len > max_bytes) len = max_bytes;
+    /* 回退：若 len 指向多字节字符的中间字节，则回退到该字符首字节 */
+    while (len > 0 && ((unsigned char)src[len] & 0xC0) == 0x80) len--;
+    size_t copy = len < cap - 1 ? len : cap - 1;
+    memcpy(dst, src, copy);
+    dst[copy] = '\0';
+}
+
+void app_state_publish_live2d(bool connected, app_expr_t expression, app_motion_t motion,
+                              const char *message_preview)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_state.live2d.connected = connected;
+    s_state.live2d.expression = expression;
+    s_state.live2d.motion = motion;
+    truncate_utf8(s_state.live2d.message_preview, sizeof(s_state.live2d.message_preview),
+                  message_preview, sizeof(s_state.live2d.message_preview) - 1);
+    s_state.live2d.updated_ms = now_ms();
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void app_state_publish_live2d_conn(bool connected)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_state.live2d.connected = connected;
+    s_state.live2d.updated_ms = now_ms();
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void app_state_publish_live2d_message(const char *message_preview)
+{
+    portENTER_CRITICAL(&s_lock);
+    truncate_utf8(s_state.live2d.message_preview, sizeof(s_state.live2d.message_preview),
+                  message_preview, sizeof(s_state.live2d.message_preview) - 1);
+    s_state.live2d.updated_ms = now_ms();
+    portEXIT_CRITICAL(&s_lock);
+}
+
 const app_state_t *app_state_get(void)
 {
     return &s_state;

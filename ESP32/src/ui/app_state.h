@@ -65,6 +65,36 @@ typedef struct {
     char artist[32];
 } app_state_media_t;
 
+/* Live2D 表情枚举（与协议白名单一致，未知值回退 neutral） */
+typedef enum {
+    APP_EXPR_NEUTRAL = 0,
+    APP_EXPR_HAPPY,
+    APP_EXPR_SAD,
+    APP_EXPR_ANGRY,
+    APP_EXPR_SURPRISED,
+    APP_EXPR_THINKING,
+    APP_EXPR_COUNT,
+} app_expr_t;
+
+/* Live2D 动作枚举（与协议白名单一致，未知值回退 idle） */
+typedef enum {
+    APP_MOTION_IDLE = 0,
+    APP_MOTION_SPEAKING,
+    APP_MOTION_LISTENING,
+    APP_MOTION_THINKING,
+    APP_MOTION_WAVING,
+    APP_MOTION_COUNT,
+} app_motion_t;
+
+/* Live2D 状态快照（Windows 完整 Live2D → ESP32 简易互动终端） */
+typedef struct {
+    bool connected;          /* Windows TCP 客户端是否在线 */
+    app_expr_t expression;   /* 当前表情 */
+    app_motion_t motion;     /* 当前动作 */
+    char message_preview[96 + 1]; /* 最新回复摘要（协议限 96 UTF-8 字节） */
+    uint32_t updated_ms;     /* 更新时间戳 */
+} app_state_live2d_t;
+
 /* 完整状态快照（UI 每帧读取） */
 typedef struct {
     app_state_power_t power;
@@ -73,6 +103,7 @@ typedef struct {
     app_state_conn_t conn;
     app_state_chat_t chat;
     app_state_media_t media;
+    app_state_live2d_t live2d;
 } app_state_t;
 
 /* ------------------------------------------------------------------ */
@@ -84,6 +115,16 @@ void app_state_publish_clock(bool synced, uint8_t hour, uint8_t min, const char 
 void app_state_publish_conn(app_conn_state_t wifi, app_conn_state_t uart, app_conn_state_t win);
 void app_state_publish_chat(app_conn_state_t conn, const char *summary);
 void app_state_publish_media(bool has_source, bool playing, const char *title, const char *artist);
+void app_state_publish_live2d(bool connected, app_expr_t expression, app_motion_t motion,
+                              const char *message_preview);
+void app_state_publish_live2d_conn(bool connected);
+void app_state_publish_live2d_message(const char *message_preview);
+
+/* 表情/动作枚举 ↔ 协议字符串（解析失败回退 neutral/idle） */
+app_expr_t app_expr_from_str(const char *s);
+app_motion_t app_motion_from_str(const char *s);
+const char *app_expr_to_str(app_expr_t e);
+const char *app_motion_to_str(app_motion_t m);
 
 /* ------------------------------------------------------------------ */
 /* 读取快照（UI 调用）                                                */

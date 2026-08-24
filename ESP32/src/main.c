@@ -38,6 +38,7 @@
 #include "lcd_ui.h"
 #include "touch.h"
 #include "touch_test_ui.h"
+#include "network/net_app.h"
 #include "ui/app_state.h"
 #include "ui_app.h"
 #include "uart_justfloat.h"
@@ -303,6 +304,14 @@ void app_main(void)
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "touch_init failed: %s", esp_err_to_name(err));
+    }
+
+    /* 4.8 网络：NVS + Wi-Fi（STA/配网）+ TCP 服务端 + 设备发现 */
+    ESP_LOGI(TAG, "--- network init ---");
+    err = net_app_start();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "net_app_start failed: %s", esp_err_to_name(err));
     }
 
     /* 5. 启动并行任务

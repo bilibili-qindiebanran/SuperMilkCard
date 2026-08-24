@@ -148,10 +148,14 @@ pio run
 
 **症状**：`Warning! Flash memory size mismatch detected. Expected 8MB, found 2MB!`
 
-**原因**：`esp32-s3-devkitc-1` 板型默认 8MB Flash，实际板子可能为 2MB。
+**原因**：`esp32-s3-devkitc-1` 板型默认 8MB Flash；旧配置与实际模块容量不一致。
 
-**修复**：在 `platformio.ini` 中按实际硬件覆盖：
+**修复**：按实际模块覆盖。本仓库实际使用 **ESP32-S3-WROOM-1-N16R8（16 MB Flash + 8 MB Octal PSRAM）**，在 `platformio.ini` 中：
 
 ```ini
-board_build.flash_size = 2MB
+board_build.flash_size = 16MB
+board_upload.flash_size = 16MB
+board_build.partitions = partitions_16mb_4m.csv
 ```
+
+> 若你手上的模块不是 16 MB，请按实际容量修改 `platformio.ini` 与 `sdkconfig.esp32-s3` 中的 `CONFIG_ESPTOOLPY_FLASHSIZE`，并选用合适的 `partitions_*.csv`。
