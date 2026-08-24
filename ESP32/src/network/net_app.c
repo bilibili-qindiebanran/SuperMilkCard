@@ -5,7 +5,9 @@
 
 #include "net_app.h"
 
+#include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 
 #include "net_config.h"
 #include "net_tcp.h"
@@ -15,7 +17,24 @@ static const char *TAG = "net_app";
 
 esp_err_t net_app_start(void)
 {
-    esp_err_t err = net_config_init();
+    /* 先初始化 lwIP 网络栈与事件循环：
+     * esp_netif_init() 创建 tcpip 线程，TCP/UDP socket 才能安全创建；
+     * 必须在 net_tcp_start()（会立即创建 socket）之前完成。 */
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGE(TAG, "esp_event_loop_create_default failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = net_config_init();
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "net_config_init failed: %s", esp_err_to_name(err));
