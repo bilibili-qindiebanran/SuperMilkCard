@@ -4,6 +4,9 @@ import type {
   ApiKeySection,
   ApiKeyTestRequest,
   ApiKeyTestResult,
+  AstrbotSendRequest,
+  AstrbotSendResult,
+  AstrbotStatus,
   ChatStreamRequest,
   EmotionClassifyItem,
   Esp32Device,
@@ -94,6 +97,15 @@ const api: RendererApi = {
     stop: (): Promise<void> => ipcRenderer.invoke('perf:stop'),
     getLatest: (): Promise<PerfSample | null> => ipcRenderer.invoke('perf:get-latest'),
     onSample: (cb) => subscribe<PerfSample>('perf:sample', cb)
+  },
+  astrbot: {
+    connect: (): Promise<AstrbotStatus> => ipcRenderer.invoke('astrbot:connect'),
+    disconnect: (): Promise<AstrbotStatus> => ipcRenderer.invoke('astrbot:disconnect'),
+    getStatus: (): Promise<AstrbotStatus> => ipcRenderer.invoke('astrbot:get-status'),
+    sendMessage: (req: AstrbotSendRequest): Promise<AstrbotSendResult> =>
+      ipcRenderer.invoke('astrbot:send-message', req),
+    stop: (): void => ipcRenderer.send('astrbot:stop'),
+    onStatus: (cb) => subscribe<AstrbotStatus>('astrbot:status', cb)
   }
 }
 

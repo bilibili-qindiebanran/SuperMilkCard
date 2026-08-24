@@ -6,6 +6,7 @@ import { useSettingsStore } from './stores/settings'
 import { useChatStore } from './stores/chat'
 import { useEsp32Store } from './stores/esp32'
 import { usePerfStore } from './stores/perf'
+import { useAstrbotStore } from './stores/astrbot'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,6 +14,7 @@ const settings = useSettingsStore()
 const chat = useChatStore()
 const esp32 = useEsp32Store()
 const perf = usePerfStore()
+const astrbot = useAstrbotStore()
 
 const theme = computed(() => (settings.theme === 'dark' ? darkTheme : null))
 const isDark = computed(() => settings.theme === 'dark')
@@ -131,7 +133,9 @@ onMounted(async () => {
   chat.setupListeners()
   esp32.setupListeners()
   perf.setupListeners()
+  astrbot.setupListeners()
   void esp32.refresh()
+  void astrbot.refresh()
 })
 
 watchEffect(() => {

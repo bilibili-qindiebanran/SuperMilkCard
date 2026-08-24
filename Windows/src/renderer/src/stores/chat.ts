@@ -12,6 +12,7 @@ import { extractEmotionTags, stripEmotionInstruction } from '@shared/emotion'
 import { useSettingsStore } from './settings'
 import { useLive2dStore } from './live2d'
 import { useEsp32Store } from './esp32'
+import { useAstrbotStore } from './astrbot'
 
 let seq = 0
 function uid(): string {
@@ -68,7 +69,13 @@ export const useChatStore = defineStore('chat', {
 
     stop(): void {
       if (!this.streaming) return
-      window.api.llm.abort(this.streamingChatId)
+      const settings = useSettingsStore()
+      const astrbot = useAstrbotStore()
+      if (settings.astrbot.enabled && astrbot.connected) {
+        astrbot.stop()
+      } else {
+        window.api.llm.abort(this.streamingChatId)
+      }
       this.finishStream()
     },
 
@@ -89,6 +96,37 @@ export const useChatStore = defineStore('chat', {
       }
       this.history.push(assistant)
 
+      this.streaming = true
+      this.streamingChatId = uid()
+      this.streamingMessageId = assistant.id
+      this.error = ''
+      this.lastEmotion = ''
+      this.triggeredActions = []
+
+      // AstrBot 模式：把机器人核心处理委托给 AstrBot，跳过本地 chatStream
+      const astrbot = useAstrbotStore()
+      if (settings.astrbot.enabled && astrbot.connected) {
+        const userMsg = [...this.history].reverse().find((m) => m.role === 'user')
+        console.log(
+          `[chat] AstrBot 模式 chatId=${this.streamingChatId} content='${userMsg?.content ?? ''}' ` +
+            `images=${userMsg?.images?.length ?? 0}`
+        )
+        void astrbot.sendMessage({
+          chatId: this.streamingChatId,
+          content: userMsg?.content ?? '',
+          images: userMsg?.images,
+          systemPromptExtra: settings.live2d.enabled ? live2d.emotionInstruction : ''
+        })
+        return
+      }
+
+      // 本地 LLM 模式
+      const imageCount = this.history.reduce(
+        (acc, m) => acc + (m.images?.length ?? 0),
+        0
+      )
+      console.log(`[chat] 本地 LLM 模式 chatId=${this.streamingChatId} historyImages=${imageCount}`)
+
       // 系统提示词 = 人设（剥离其中手工写死的情绪指令句） + 按模型自动生成的情绪标签指令
       const personaSystem = stripEmotionInstruction(settings.persona.systemPrompt)
       const emotionInjection = settings.live2d.enabled ? live2d.emotionInstruction : ''
@@ -97,13 +135,6 @@ export const useChatStore = defineStore('chat', {
         content: [personaSystem, emotionInjection].filter(Boolean).join('\n')
       }
       const { messages } = trimToContext(this.history, settings.llm.maxContextTokens)
-
-      this.streaming = true
-      this.streamingChatId = uid()
-      this.streamingMessageId = assistant.id
-      this.error = ''
-      this.lastEmotion = ''
-      this.triggeredActions = []
 
       window.api.llm.chatStream({
         chatId: this.streamingChatId,

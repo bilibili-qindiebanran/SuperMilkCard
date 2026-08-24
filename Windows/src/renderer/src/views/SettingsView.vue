@@ -18,6 +18,7 @@ import { useSettingsStore } from '../stores/settings'
 import { useLive2dStore } from '../stores/live2d'
 import { useEsp32Store } from '../stores/esp32'
 import { usePerfStore } from '../stores/perf'
+import { useAstrbotStore } from '../stores/astrbot'
 import {
   EXPRESSION_SEMANTICS,
   EXPRESSION_SEMANTIC_LABELS,
@@ -35,6 +36,7 @@ const settings = useSettingsStore()
 const live2d = useLive2dStore()
 const esp32 = useEsp32Store()
 const perf = usePerfStore()
+const astrbot = useAstrbotStore()
 const savedTip = ref(false)
 const live2dTip = ref('')
 const importing = ref(false)
@@ -59,6 +61,17 @@ const esp32StateLabel = computed(() => {
     error: '错误'
   }
   return map[esp32.status.state] ?? esp32.status.state
+})
+
+const astrbotStateLabel = computed(() => {
+  const map: Record<string, string> = {
+    idle: '未连接',
+    connecting: '连接中',
+    connected: '已连接',
+    reconnecting: '重连中',
+    error: '错误'
+  }
+  return map[astrbot.status.state] ?? astrbot.status.state
 })
 
 const perfMetricOptions = [
@@ -90,6 +103,12 @@ async function onToggleConnect(): Promise<void> {
   await settings.save({ esp32: JSON.parse(JSON.stringify(settings.esp32)) })
   if (esp32.connected) await esp32.disconnect()
   else await esp32.connect()
+}
+
+async function onToggleAstrbot(): Promise<void> {
+  await settings.save({ astrbot: JSON.parse(JSON.stringify(settings.astrbot)) })
+  if (astrbot.connected) await astrbot.disconnect()
+  else await astrbot.connect()
 }
 
 async function onPerfToggle(v: boolean): Promise<void> {
@@ -374,13 +393,17 @@ async function reset(): Promise<void> {
     <n-alert v-if="savedTip" type="success" class="settings-tip">已保存</n-alert>
 
     <div class="settings-cards">
-      <n-card title="大模型（LLM）" size="small">
-        <n-form label-placement="top" :show-feedback="false">
+      <n-card
+        title="大模型（LLM）"
+        size="small"
+        :class="{ 'is-disabled': settings.astrbot.enabled }"
+      >
+        <n-form label-placement="top" :show-feedback="false" :disabled="settings.astrbot.enabled">
           <n-form-item label="Base URL">
             <n-input v-model:value="settings.llm.baseUrl" placeholder="https://api.openai.com/v1" />
           </n-form-item>
           <n-form-item label="API Key">
-            <ApiKeySetting section="llm" />
+            <ApiKeySetting section="llm" :disabled="settings.astrbot.enabled" />
           </n-form-item>
           <n-form-item label="模型">
             <n-input v-model:value="settings.llm.model" placeholder="gpt-4o-mini" />
@@ -406,6 +429,9 @@ async function reset(): Promise<void> {
             />
           </n-form-item>
         </n-form>
+        <n-alert v-if="settings.astrbot.enabled" type="info" size="small" style="margin-top: 12px">
+          已启用 AstrBot 连接，聊天由 AstrBot 处理，本地大模型设置不生效；关闭 AstrBot 后恢复。
+        </n-alert>
       </n-card>
 
       <n-card title="文转语音（TTS）" size="small">
@@ -681,6 +707,45 @@ async function reset(): Promise<void> {
         </n-form>
       </n-card>
 
+      <n-card title="AstrBot 连接" size="small">
+        <n-form label-placement="top" :show-feedback="false">
+          <n-form-item label="启用 AstrBot（把机器人核心处理交给 AstrBot）">
+            <n-switch v-model:value="settings.astrbot.enabled" />
+          </n-form-item>
+          <n-form-item label="地址">
+            <n-input v-model:value="settings.astrbot.host" placeholder="localhost" />
+          </n-form-item>
+          <n-form-item label="端口">
+            <n-input-number v-model:value="settings.astrbot.port" :min="1" :max="65535" />
+          </n-form-item>
+          <div class="form-row">
+            <n-form-item label="人格 ID（可选）">
+              <n-input
+                v-model:value="settings.astrbot.personaId"
+                placeholder="AstrBot 中配置的 persona_id"
+              />
+            </n-form-item>
+            <n-form-item label="会话 ID（可选，留空自动生成）">
+              <n-input
+                v-model:value="settings.astrbot.sessionId"
+                placeholder="留空自动生成并持久化"
+              />
+            </n-form-item>
+          </div>
+          <div class="esp32-status">
+            <span class="esp32-state" :class="astrbot.status.state">
+              状态：{{ astrbotStateLabel }}
+            </span>
+            <span v-if="astrbot.status.message" class="esp32-msg">{{
+              astrbot.status.message
+            }}</span>
+          </div>
+          <n-button size="small" type="primary" @click="onToggleAstrbot()">
+            {{ astrbot.connected ? '断开' : '连接' }}
+          </n-button>
+        </n-form>
+      </n-card>
+
       <n-card title="性能监测" size="small">
         <n-form label-placement="top" :show-feedback="false">
           <n-form-item label="启用监测">
@@ -839,5 +904,10 @@ async function reset(): Promise<void> {
   margin-top: 8px;
   font-size: 13px;
   color: var(--text-2);
+}
+
+.settings-cards .is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
 }
 </style>

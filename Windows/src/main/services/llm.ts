@@ -2,7 +2,23 @@ import type { ChatStreamRequest, EmotionClassifyItem, LlmChunk } from '@shared/t
 import { getSettings } from './settings'
 
 interface SseChunk {
-  choices?: Array<{ delta?: { content?: string } }>
+  choices?: Array<{ delta?: Record<string, unknown> }>
+}
+
+/** 从 chunk 的 delta 中提取文本：兼容 content / reasoning_content / 内容为数组 三种形态 */
+function extractDeltaText(delta: unknown): string {
+  if (!delta || typeof delta !== 'object') return ''
+  const d = delta as Record<string, unknown>
+  const pick = (v: unknown): string => {
+    if (typeof v === 'string') return v
+    if (Array.isArray(v)) {
+      return v
+        .map((p) => (typeof p === 'string' ? p : ((p as { text?: string })?.text ?? '')))
+        .join('')
+    }
+    return ''
+  }
+  return pick(d.content) || pick(d.reasoning_content) || ''
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -26,24 +42,41 @@ export async function streamChat(
   if (!model) throw new Error('请先在设置中填写模型名')
 
   const url = normalizeBaseUrl(baseUrl)
+
+  // 诊断：统计消息中的图片片段数（图片会导致 payload 变大、后端需要多模态处理）
+  const imageParts = req.messages.reduce((acc, m) => {
+    if (!Array.isArray(m.content)) return acc
+    return acc + m.content.filter((p) => p.type === 'image_url').length
+  }, 0)
+  const body = JSON.stringify({
+    model,
+    messages: req.messages,
+    temperature,
+    max_tokens: maxTokens,
+    stream: true
+  })
+  console.log(
+    `[llm] streamChat start: url=${url} model=${model} messages=${req.messages.length} ` +
+      `imageParts=${imageParts} bodyKB=${Math.round(Buffer.byteLength(body) / 1024)}`
+  )
+
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`
     },
-    body: JSON.stringify({
-      model,
-      messages: req.messages,
-      temperature,
-      max_tokens: maxTokens,
-      stream: true
-    }),
+    body,
     signal
   })
+  console.log(
+    `[llm] streamChat fetch resolved: status=${res.status} ok=${res.ok} ` +
+      `contentType=${res.headers.get('content-type')}`
+  )
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    console.log(`[llm] streamChat non-ok body: ${text.slice(0, 300)}`)
     throw new Error(`请求失败 (HTTP ${res.status})${text ? `：${text.slice(0, 300)}` : ''}`)
   }
   if (!res.body) throw new Error('响应没有内容流')
@@ -52,6 +85,10 @@ export async function streamChat(
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
   let full = ''
+  let dataLines = 0
+  let firstTokenAt: number | null = null
+  let loggedDeltaKeys = false
+  const t0 = Date.now()
 
   while (true) {
     const { done, value } = await reader.read()
@@ -64,19 +101,34 @@ export async function streamChat(
       if (!line.startsWith('data:')) continue
       const data = line.slice(5).trim()
       if (data === '[DONE]') continue
+      dataLines += 1
+      if (firstTokenAt === null) {
+        firstTokenAt = Date.now() - t0
+        console.log(`[llm] streamChat first SSE data after ${firstTokenAt}ms: ${data.slice(0, 160)}`)
+      }
+      if (dataLines <= 3) console.log(`[llm] streamChat SSE#${dataLines}: ${data.slice(0, 160)}`)
       let json: SseChunk
       try {
         json = JSON.parse(data) as SseChunk
       } catch {
         continue
       }
-      const delta = json.choices?.[0]?.delta?.content
+      const deltaObj = json.choices?.[0]?.delta
+      if (deltaObj && !loggedDeltaKeys) {
+        loggedDeltaKeys = true
+        console.log(`[llm] streamChat delta keys: ${Object.keys(deltaObj).join(',')}`)
+      }
+      const delta = extractDeltaText(deltaObj)
       if (delta) {
         full += delta
         onChunk({ chatId: req.chatId, delta })
       }
     }
   }
+  console.log(
+    `[llm] streamChat done: elapsed=${Date.now() - t0}ms dataLines=${dataLines} ` +
+      `chars=${full.length} firstTokenAt=${firstTokenAt ?? 'never'}`
+  )
   return full
 }
 

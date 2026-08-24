@@ -14,10 +14,12 @@ const props = withDefaults(
     section: ApiKeySection
     label?: string
     hint?: string
+    disabled?: boolean
   }>(),
   {
     label: 'API Key',
-    hint: '请输入 API Key；格式通常以 sk- 开头，建议 ≥ 16 位，不含空格。'
+    hint: '请输入 API Key；格式通常以 sk- 开头，建议 ≥ 16 位，不含空格。',
+    disabled: false
   }
 )
 
@@ -100,8 +102,16 @@ async function onClear(): Promise<void> {
       </n-tag>
       <span v-if="hasApiKey" class="api-key-masked">{{ maskedKey }}</span>
       <span class="api-key-actions">
-        <n-button size="small" type="primary" strong ghost @click="open">设置 API Key</n-button>
-        <n-button v-if="hasApiKey" size="small" type="error" quaternary @click="onClear"
+        <n-button size="small" type="primary" strong ghost :disabled="disabled" @click="open"
+          >设置 API Key</n-button
+        >
+        <n-button
+          v-if="hasApiKey"
+          size="small"
+          type="error"
+          quaternary
+          :disabled="disabled"
+          @click="onClear"
           >清除</n-button
         >
       </span>

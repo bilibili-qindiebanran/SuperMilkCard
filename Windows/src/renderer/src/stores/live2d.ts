@@ -69,7 +69,7 @@ export const useLive2dStore = defineStore('live2d', {
         parts.push(`${tierLabel(t.semantic as ExpressionSemantic, t.level)}用 [emotion: ${t.key}]`)
       }
       if (parts.length === 0) return ''
-      return `请在回复中通过标签表达情绪：${parts.join('、')}。`
+      return `请在回复中通过标签表达情绪：${parts.join('、')}。如需表达动作，可用 [action: 动作名] 标签（例如 [action: wave]），标签不要出现在正文中。`
     }
   },
   actions: {
@@ -218,6 +218,16 @@ export const useLive2dStore = defineStore('live2d', {
 
     pan(dx: number, dy: number): void {
       controller?.addPan(dx, dy)
+    },
+
+    /** 让模型注视舞台上的某个点（相对 canvas 左上角的坐标）。 */
+    focus(clientX: number, clientY: number): void {
+      controller?.focus(clientX, clientY)
+    },
+
+    /** 让模型恢复正视前方（注视目标回中）。 */
+    resetFocus(): void {
+      controller?.resetFocus()
     },
 
     resize(width: number, height: number): void {
