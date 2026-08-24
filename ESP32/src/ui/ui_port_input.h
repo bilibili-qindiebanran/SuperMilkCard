@@ -23,6 +23,7 @@ extern "C" {
  * @return ESP_OK 成功
  */
 esp_err_t ui_port_input_create(void);
+bool ui_port_input_is_pressed(void);
 
 #ifdef __cplusplus
 }

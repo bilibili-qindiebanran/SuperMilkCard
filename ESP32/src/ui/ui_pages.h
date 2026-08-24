@@ -53,6 +53,7 @@ void ui_pages_return_home(void);
  * @brief 当前是否处于全屏 Live2D 互动页
  */
 bool ui_pages_live2d_active(void);
+void ui_pages_invalidate_active(void);
 
 #ifdef __cplusplus
 }

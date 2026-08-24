@@ -29,13 +29,35 @@
 #include "ui_theme.h"
 
 static const char *TAG = "ui_app";
+static uint8_t s_slow_refresh_divider;
 
 static void ui_state_refresh_cb(lv_timer_t *timer)
 {
     (void)timer;
-    ui_page_home_refresh();
-    ui_page_settings_refresh();
-    ui_page_live2d_refresh();
+
+    if (ui_pages_live2d_active())
+    {
+        ui_page_live2d_refresh();
+        return;
+    }
+
+    if (ui_pages_current() == UI_PAGE_HOME)
+    {
+        ui_page_home_refresh_fps();
+    }
+
+    if (ui_port_input_is_pressed())
+    {
+        ui_pages_invalidate_active();
+    }
+    if (++s_slow_refresh_divider >= 15)
+    {
+        s_slow_refresh_divider = 0;
+        if (ui_pages_current() == UI_PAGE_SETTINGS)
+        {
+            ui_page_settings_refresh();
+        }
+    }
 }
 
 /* LVGL 心跳（周期调用 lv_tick_inc） */
@@ -94,7 +116,7 @@ esp_err_t ui_app_start(void)
 
     /* 阶段5：创建页面 + 底部导航 */
     ui_pages_create(lv_scr_act());
-    lv_timer_create(ui_state_refresh_cb, 500, NULL);
+    lv_timer_create(ui_state_refresh_cb, 33, NULL);
 
     /* 调试：打印旋转后分辨率确认方向 */
     ESP_LOGI(TAG, "disp: hor=%d ver=%d rot=%d",

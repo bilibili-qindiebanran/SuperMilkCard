@@ -148,3 +148,11 @@ bool ui_pages_live2d_active(void)
 {
     return s_live2d_page && !lv_obj_has_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
 }
+
+void ui_pages_invalidate_active(void)
+{
+    lv_obj_t *page = s_live2d_page && !lv_obj_has_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN)
+                          ? s_live2d_page
+                          : s_pages[s_current];
+    if (page) lv_obj_invalidate(page);
+}

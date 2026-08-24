@@ -116,6 +116,11 @@ static void ui_port_input_task(void *arg)
 /* ------------------------------------------------------------------ */
 /* 创建输入                                                            */
 /* ------------------------------------------------------------------ */
+bool ui_port_input_is_pressed(void)
+{
+    return s_pointer_state == LV_INDEV_STATE_PRESSED;
+}
+
 esp_err_t ui_port_input_create(void)
 {
     if (s_indev_ptr != NULL)
