@@ -4,6 +4,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "lvgl.h"
 
@@ -25,6 +26,20 @@ static lv_obj_t *s_conn_detail;
 static lv_obj_t *s_home_page;
 static lv_obj_t *s_fps_label;
 static int s_last_audio_bar_value = -1;
+static uint32_t s_last_fps = UINT32_MAX;
+static int s_clock_status_code = -1;
+static int s_power_status_code = -1;
+static int s_conn_status_code = -1;
+
+static void label_set_text_if_changed(lv_obj_t *label, const char *text)
+{
+    if (label == NULL || text == NULL) return;
+    const char *current = lv_label_get_text(label);
+    if (current == NULL || strcmp(current, text) != 0)
+    {
+        lv_label_set_text(label, text);
+    }
+}
 
 static lv_obj_t *card_create(lv_obj_t *parent, lv_coord_t x, lv_coord_t y,
                              lv_coord_t w, lv_coord_t h, bool soft)
@@ -64,9 +79,14 @@ static void update_connection_state(const app_state_t *state)
     snprintf(detail, sizeof(detail), "%s %s   %s %s",
              UI_STR_CONN_WIFI, connection_text(state->conn.wifi),
              UI_STR_CONN_UART, connection_text(state->conn.uart));
-    lv_label_set_text(s_conn_value, connection_text(state->conn.win));
-    lv_label_set_text(s_conn_detail, detail);
-    ui_theme_apply_status_text(s_conn_value, state->conn.win == APP_CONN_OK ? 1 : 0);
+    label_set_text_if_changed(s_conn_value, connection_text(state->conn.win));
+    label_set_text_if_changed(s_conn_detail, detail);
+    int conn_status = state->conn.win == APP_CONN_OK ? 1 : 0;
+    if (conn_status != s_conn_status_code)
+    {
+        ui_theme_apply_status_text(s_conn_value, conn_status);
+        s_conn_status_code = conn_status;
+    }
 }
 
 void ui_page_home_refresh(void)
@@ -79,24 +99,37 @@ void ui_page_home_refresh(void)
     if (state->clock.synced)
     {
         snprintf(text, sizeof(text), "%02u:%02u", state->clock.hour, state->clock.min);
-        lv_label_set_text(s_clock_status, UI_STR_TIME_SYNCED);
-        ui_theme_apply_status_text(s_clock_status, 1);
+        label_set_text_if_changed(s_clock_status, UI_STR_TIME_SYNCED);
+        if (s_clock_status_code != 1)
+        {
+            ui_theme_apply_status_text(s_clock_status, 1);
+            s_clock_status_code = 1;
+        }
     }
     else
     {
-        lv_label_set_text(s_clock_status, UI_STR_TIME_WAIT);
-        ui_theme_apply_status_text(s_clock_status, 2);
+        label_set_text_if_changed(s_clock_status, UI_STR_TIME_WAIT);
+        if (s_clock_status_code != 2)
+        {
+            ui_theme_apply_status_text(s_clock_status, 2);
+            s_clock_status_code = 2;
+        }
     }
-    lv_label_set_text(s_clock_value, text[0] ? text : UI_STR_TIME_PLACE);
+    label_set_text_if_changed(s_clock_value, text[0] ? text : UI_STR_TIME_PLACE);
 
-    if (state->power.charging) lv_label_set_text(s_power_value, UI_STR_POWER_CHG);
-    else if (state->power.charge_full) lv_label_set_text(s_power_value, UI_STR_POWER_FULL);
-    else lv_label_set_text(s_power_value, UI_STR_POWER_IDLE);
-    lv_label_set_text(s_power_detail, state->power.light_load ? UI_STR_POWER_LIGHT : UI_STR_POWER_STABLE);
-    ui_theme_apply_status_text(s_power_value, state->power.charging || state->power.charge_full ? 1 : 0);
+    if (state->power.charging) label_set_text_if_changed(s_power_value, UI_STR_POWER_CHG);
+    else if (state->power.charge_full) label_set_text_if_changed(s_power_value, UI_STR_POWER_FULL);
+    else label_set_text_if_changed(s_power_value, UI_STR_POWER_IDLE);
+    label_set_text_if_changed(s_power_detail, state->power.light_load ? UI_STR_POWER_LIGHT : UI_STR_POWER_STABLE);
+    int power_status = state->power.charging || state->power.charge_full ? 1 : 0;
+    if (power_status != s_power_status_code)
+    {
+        ui_theme_apply_status_text(s_power_value, power_status);
+        s_power_status_code = power_status;
+    }
 
     snprintf(text, sizeof(text), "%+.1f dB", (double)state->audio.rms_db);
-    lv_label_set_text(s_audio_value, text);
+    label_set_text_if_changed(s_audio_value, text);
     int bar_value = (int)((state->audio.rms_db + 60.0f) * 100.0f / 60.0f);
     if (bar_value < 0) bar_value = 0;
     if (bar_value > 100) bar_value = 100;
@@ -110,7 +143,24 @@ void ui_page_home_refresh(void)
 
     if (s_fps_label != NULL)
     {
-        lv_label_set_text_fmt(s_fps_label, "FPS %lu", (unsigned long)ui_port_display_get_fps());
+        uint32_t fps = ui_port_display_get_fps();
+        if (fps != s_last_fps)
+        {
+            lv_label_set_text_fmt(s_fps_label, "FPS %lu", (unsigned long)fps);
+            s_last_fps = fps;
+        }
+    }
+}
+
+void ui_page_home_refresh_fps(void)
+{
+    if (s_fps_label == NULL) return;
+
+    uint32_t fps = ui_port_display_get_fps();
+    if (fps != s_last_fps)
+    {
+        lv_label_set_text_fmt(s_fps_label, "FPS %lu", (unsigned long)fps);
+        s_last_fps = fps;
     }
 }
 

@@ -30,6 +30,7 @@ static uint16_t *s_buf2 = NULL;
 static uint32_t s_frame_count;
 static uint32_t s_fps;
 static int64_t s_fps_window_start_us;
+
 static bool s_te_sync_pending = true;
 
 /* ------------------------------------------------------------------ */
