@@ -193,6 +193,8 @@ export interface AstrbotSendRequest {
 export interface AstrbotSendResult {
   ok: boolean
   message?: string
+}
+
 /** 发送到 ESP32 的 Live2D 状态（字段白名单，未知值由 ESP32 回退） */
 export interface Esp32Live2dState {
   /** 表情：neutral / happy / sad / angry / surprised / thinking */
