@@ -21,11 +21,18 @@
 #include "lcd_ui.h"
 #include "touch.h"
 #include "ui_pages.h"
+#include "pages/ui_page_home.h"
 #include "ui_port_display.h"
 #include "ui_port_input.h"
 #include "ui_theme.h"
 
 static const char *TAG = "ui_app";
+
+static void ui_state_refresh_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    ui_page_home_refresh();
+}
 
 /* LVGL 心跳（周期调用 lv_tick_inc） */
 static void ui_tick_task(void *arg)
@@ -83,6 +90,7 @@ esp_err_t ui_app_start(void)
 
     /* 阶段5：创建页面 + 底部导航 */
     ui_pages_create(lv_scr_act());
+    lv_timer_create(ui_state_refresh_cb, 500, NULL);
 
     /* 调试：打印旋转后分辨率确认方向 */
     ESP_LOGI(TAG, "disp: hor=%d ver=%d rot=%d",

@@ -1,6 +1,6 @@
 /**
  * @file ui_page_settings.h
- * @brief 设置页
+ * @brief Fluent 2 设置入口页
  */
 
 #pragma once
