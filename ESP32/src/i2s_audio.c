@@ -29,6 +29,8 @@ static i2s_chan_handle_t s_rx = NULL; /* ICS-43434 麦克风 */
 
 /* I2S 读取互斥：JustFloat 轮询与语音录音并发读同一 RX 通道，需串行化 */
 static SemaphoreHandle_t s_rx_lock;
+/* 语音录音独占：置位后非语音任务读取立即超时返回 */
+static volatile bool s_rx_exclusive;
 
 /* SPKMODE 脚配置：拉高（默认增益档，MAX98357A 手册 GAIN_SLOT=VDD 时增益 9dB 且 L+R 混合） */
 static void spkmode_init(void)
@@ -135,10 +137,38 @@ esp_err_t i2s_audio_init(void)
     return ESP_OK;
 }
 
+void i2s_audio_set_rx_exclusive(bool exclusive)
+{
+    s_rx_exclusive = exclusive;
+}
+
+/* 语音专用读取：不检查独占标志（录音期间唯一允许读的路径）。
+ * 关键：i2s_channel_read 在超时内能读多少读多少（bytes_read 返回实际），
+ * 不要求读满 frames —— DMA 数据是按帧累积的，读不满不应视为失败。 */
+esp_err_t i2s_audio_read_voice(int32_t *buf, size_t frames)
+{
+    if (s_rx == NULL || buf == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_rx_lock && xSemaphoreTake(s_rx_lock, pdMS_TO_TICKS(20)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    size_t bytes_read = 0;
+    esp_err_t err = i2s_channel_read(s_rx, buf, frames * sizeof(int32_t), &bytes_read,
+                                     pdMS_TO_TICKS(50));
+    if (s_rx_lock) xSemaphoreGive(s_rx_lock);
+    /* 即使只读到部分数据也视为成功（调用方用 bytes_read 处理） */
+    return err;
+}
+
 esp_err_t i2s_audio_read(int32_t *buf, size_t frames)
 {
     if (s_rx == NULL || buf == NULL) {
         return ESP_ERR_INVALID_STATE;
+    }
+    /* 语音录音独占期间，非录音任务读取直接超时（不抢 DMA 数据） */
+    if (s_rx_exclusive) {
+        return ESP_ERR_TIMEOUT;
     }
     /* 串行化：JustFloat 轮询与语音录音并发读同一 RX 通道 */
     if (s_rx_lock && xSemaphoreTake(s_rx_lock, pdMS_TO_TICKS(10)) != pdTRUE) {

@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -70,6 +71,20 @@ esp_err_t i2s_audio_init(void);
  * @return ESP_OK 成功
  */
 esp_err_t i2s_audio_read(int32_t *buf, size_t frames);
+
+/**
+ * @brief 语音录音专用读取（独占期间唯一允许读的路径）
+ * 等待更久以攒够数据，供 audio_voice 录音任务使用。
+ */
+esp_err_t i2s_audio_read_voice(int32_t *buf, size_t frames);
+
+/**
+ * @brief 独占麦克风读取（语音录音用）。
+ * 录音期间调用 i2s_audio_read 的其它任务（如 JustFloat 轮询）会立即返回 ESP_ERR_TIMEOUT，
+ * 避免把 DMA 数据抢走导致录音读不到。
+ * @param exclusive true=开始独占；false=释放
+ */
+void i2s_audio_set_rx_exclusive(bool exclusive);
 
 /**
  * @brief 写 PCM 采样到功放

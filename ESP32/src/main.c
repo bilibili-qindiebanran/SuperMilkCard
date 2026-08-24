@@ -321,7 +321,9 @@ void app_main(void)
      * 优先级：IP5306(7) > JustFloat(6) > touch_task(5) > touch_ui(4)
      * IP5306 最高：保证电源轮询不被触摸高频 I2C 抢占导致超时 */
     xTaskCreatePinnedToCore(ip5306_poll_task, "ip5306_poll", 4096, NULL, 7, NULL, 1);
-    xTaskCreatePinnedToCore(justfloat_output_task, "justfloat_out", 4096, NULL, 6, NULL, 1);
+    /* JustFloat 输出已禁用：其 50Hz I2S 轮询会抢走语音录音的 DMA 数据。
+     * 如需恢复，重新启用下面这行并在 uart_justfloat_set_enabled(true) 打开输出。 */
+    /* xTaskCreatePinnedToCore(justfloat_output_task, "justfloat_out", 4096, NULL, 6, NULL, 1); */
     if (lcd_ok)
     {
         /* 阶段2：临时切到 LVGL 产品 UI（验证显示端口），
