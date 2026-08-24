@@ -48,7 +48,7 @@ static bool s_int_mode = false;                /* 是否中断模式 */
 static int s_int_idle_level = -1;              /* TP_INT 空闲电平 */
 
 #define TOUCH_POLL_MS 30         /* 空闲轮询周期 */
-#define TOUCH_ACTIVE_POLL_MS 8   /* 触摸中高频轮询 */
+#define TOUCH_ACTIVE_POLL_MS 10  /* 触摸中高频轮询（FreeRTOS tick=10ms） */
 #define TOUCH_INT_WAIT_MS 100    /* 中断等待超时（空闲时低功耗） */
 #define TOUCH_EVT_QUEUE_LEN 32
 

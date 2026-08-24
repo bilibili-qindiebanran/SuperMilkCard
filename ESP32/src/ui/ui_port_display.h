@@ -30,6 +30,11 @@ lv_display_t *ui_port_display_create(void);
  */
 void ui_port_display_get_resolution(int32_t *hor, int32_t *ver);
 
+/**
+ * @brief 获取最近一秒完成的整帧刷新帧率
+ */
+uint32_t ui_port_display_get_fps(void);
+
 #ifdef __cplusplus
 }
 #endif

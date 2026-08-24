@@ -10,6 +10,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -26,13 +27,23 @@ static const char *TAG = "ui_port_disp";
 static lv_display_t *s_disp = NULL;
 static uint16_t *s_buf1 = NULL;
 static uint16_t *s_buf2 = NULL;
+static uint32_t s_frame_count;
+static uint32_t s_fps;
+static int64_t s_fps_window_start_us;
+static bool s_te_sync_pending = true;
 
 /* ------------------------------------------------------------------ */
 /* flush_cb：LVGL 渲染完成回调（ISR 安全，可异步）                     */
 /* ------------------------------------------------------------------ */
 static void ui_port_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
-    /* px_map 是与 area 对应的紧凑区域；字节序转换在 lcd_ui 的 DMA 行缓冲中进行。 */
+    /* 每个 LVGL 刷新周期只等待一次 TE，避免多个局部区域各自等待造成输入延迟。 */
+    if (s_te_sync_pending)
+    {
+        lcd_ui_wait_te(20);
+        s_te_sync_pending = false;
+    }
+
     esp_err_t err = lcd_ui_flush_area(area->x1, area->y1,
                                       area->x2 + 1, area->y2 + 1, px_map);
     if (err != ESP_OK)
@@ -40,7 +51,26 @@ static void ui_port_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t 
         ESP_LOGE(TAG, "lcd_ui_flush_area failed: %s", esp_err_to_name(err));
     }
 
-    /* 3. 通知 LVGL 刷新完成（lcd_ui_flush_area 内部已同步 DMA） */
+    if (lv_display_flush_is_last(disp))
+    {
+        int64_t now_us = esp_timer_get_time();
+        if (s_fps_window_start_us == 0)
+        {
+            s_fps_window_start_us = now_us;
+        }
+        s_frame_count++;
+        int64_t elapsed_us = now_us - s_fps_window_start_us;
+        if (elapsed_us >= 1000000)
+        {
+            s_fps = (uint32_t)(((uint64_t)s_frame_count * 1000000ULL) /
+                               (uint64_t)elapsed_us);
+            s_frame_count = 0;
+            s_fps_window_start_us = now_us;
+        }
+        s_te_sync_pending = true;
+    }
+
+    /* 通知 LVGL 刷新完成（lcd_ui_flush_area 内部已同步 DMA） */
     lv_display_flush_ready(disp);
 }
 
@@ -54,7 +84,7 @@ lv_display_t *ui_port_display_create(void)
         return s_disp;
     }
 
-    /* 双 32 行条带缓冲：区域数据天然紧凑，避免整帧步长歧义。 */
+    /* PARTIAL 双缓冲（DMA 内存）：只发送脏区域，优先保证触摸响应和帧率。 */
     const uint32_t buf_bytes = UI_DISP_BUF_BYTES;
     s_buf1 = heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     if (s_buf1 == NULL)
@@ -62,7 +92,6 @@ lv_display_t *ui_port_display_create(void)
         ESP_LOGE(TAG, "buf1 alloc failed");
         return NULL;
     }
-
     s_buf2 = heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     if (s_buf2 == NULL)
     {
@@ -89,9 +118,14 @@ lv_display_t *ui_port_display_create(void)
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(s_disp, ui_port_flush_cb);
 
-    ESP_LOGI(TAG, "display created: 480x320, dual %lu-byte partial buffers",
+    ESP_LOGI(TAG, "display created: 480x320 PARTIAL DMA dual %lu-byte buffers",
              (unsigned long)buf_bytes);
     return s_disp;
+}
+
+uint32_t ui_port_display_get_fps(void)
+{
+    return s_fps;
 }
 
 void ui_port_display_get_resolution(int32_t *hor, int32_t *ver)

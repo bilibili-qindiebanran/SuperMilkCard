@@ -9,6 +9,7 @@
 
 #include "../app_state.h"
 #include "../ui_pages.h"
+#include "../ui_port_display.h"
 #include "../ui_strings.h"
 #include "../ui_theme.h"
 #include "ui_page_home.h"
@@ -22,6 +23,7 @@ static lv_obj_t *s_audio_bar;
 static lv_obj_t *s_conn_value;
 static lv_obj_t *s_conn_detail;
 static lv_obj_t *s_home_page;
+static lv_obj_t *s_fps_label;
 
 static lv_obj_t *card_create(lv_obj_t *parent, lv_coord_t x, lv_coord_t y,
                              lv_coord_t w, lv_coord_t h, bool soft)
@@ -100,6 +102,11 @@ void ui_page_home_refresh(void)
     lv_bar_set_value(s_audio_bar, bar_value, LV_ANIM_ON);
 
     update_connection_state(state);
+
+    if (s_fps_label != NULL)
+    {
+        lv_label_set_text_fmt(s_fps_label, "FPS %lu", (unsigned long)ui_port_display_get_fps());
+    }
 }
 
 lv_obj_t *ui_page_home_create(lv_obj_t *parent)
@@ -119,6 +126,11 @@ lv_obj_t *ui_page_home_create(lv_obj_t *parent)
     lv_label_set_text(ready, UI_STR_READY);
     lv_obj_align(ready, LV_ALIGN_TOP_RIGHT, -UI_MARGIN, 15);
     ui_theme_apply_status_text(ready, 1);
+
+    s_fps_label = lv_label_create(s_home_page);
+    lv_label_set_text(s_fps_label, "FPS --");
+    lv_obj_align(s_fps_label, LV_ALIGN_TOP_RIGHT, -UI_MARGIN, 40);
+    lv_obj_set_style_text_color(s_fps_label, UI_COLOR_TEXT_DIM, 0);
 
     lv_obj_t *clock_card = card_create(s_home_page, UI_MARGIN, 58, 205, 130, false);
     label_create(clock_card, UI_STR_TIME_TITLE, UI_GAP, UI_GAP, UI_COLOR_TEXT_DIM);

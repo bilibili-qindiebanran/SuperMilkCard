@@ -54,8 +54,8 @@ static void ui_loop_task(void *arg)
     while (1)
     {
         lv_timer_handler(); /* 处理 LVGL 定时器/刷新 */
-        /* 释放 CPU：16ms 周期（约 60fps 上限），避免饿死 IDLE0 触发看门狗 */
-        vTaskDelay(pdMS_TO_TICKS(16));
+        /* 高频调度，实际帧率由 TE、QSPI 传输和 LVGL 渲染耗时决定。 */
+        vTaskDelay(1);
     }
 }
 

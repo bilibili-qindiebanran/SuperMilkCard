@@ -72,9 +72,10 @@ static void ui_port_input_task(void *arg)
 
     while (1)
     {
-        /* 非阻塞批量消费触摸事件（不饿死渲染） */
-        while (touch_get_event(&evt, 0) == ESP_OK)
+        /* 有界消费触摸事件，避免队列持续有数据时长期占满 CPU。 */
+        for (int event_count = 0; event_count < 8; event_count++)
         {
+            if (touch_get_event(&evt, 0) != ESP_OK) break;
             switch (evt.event)
             {
             case TOUCH_EVT_DOWN:
@@ -108,7 +109,7 @@ static void ui_port_input_task(void *arg)
             s_key_pending = LV_KEY_ENTER;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(1);
     }
 }
 
