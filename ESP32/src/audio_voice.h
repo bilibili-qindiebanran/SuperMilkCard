@@ -1,6 +1,6 @@
 /**
  * @file audio_voice.h
- * @brief 语音上行：I2S 麦克风 → 16kHz/16bit PCM → TCP voice_start/分片/voice_end
+ * @brief 语音上行：I2S 麦克风 → 16kHz/16bit PCM → ESP32 直连 DashScope STT → TCP voice_text
  *
  * 链路：Live2D 联动模式下按住录音 → audio_voice_start() 开录 →
  *       内部任务读 I2S(48k/32bit) → 降采样 16k/16bit → 分片发 AUDIO 帧 →
@@ -24,7 +24,7 @@ extern "C" {
 esp_err_t audio_voice_start(void);
 
 /**
- * @brief 停止录音并发送 voice_end（若正在进行）。
+ * @brief 停止录音并触发 ESP32 本地 STT（若正在进行）。
  */
 void audio_voice_stop(void);
 

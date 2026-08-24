@@ -127,14 +127,41 @@ export function transcribePcm(
     const taskId = `task_${Date.now()}_${Math.floor(Math.random() * 1000)}`
     let finalText = ''
     let finished = false
+    let started = false
+    let settled = false
+
+    const fail = (message: string): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try {
+        ws.close()
+      } catch {
+        /* ignore close errors */
+      }
+      reject(new Error(message))
+    }
+
     const timer = setTimeout(() => {
-      ws.close()
-      reject(new Error('ASR 超时（15s）'))
-    }, 15000)
+      fail('ASR 超时：通义服务未在 60 秒内完成识别')
+    }, 60000)
+
+    const sendAudio = (): void => {
+      if (started === false || settled) return
+      // DashScope 要求收到 task-started 后才能发送音频，否则会丢弃音频或直接结束任务。
+      const chunkSize = 3200
+      for (let offset = 0; offset < pcm.length; offset += chunkSize) {
+        ws.send(pcm.subarray(offset, offset + chunkSize))
+      }
+      ws.send(JSON.stringify({
+        header: { action: 'finish-task', task_id: taskId },
+        payload: { input: {} }
+      }))
+      console.log('[stt] DashScope audio sent', { taskId, bytes: pcm.length, format })
+    }
 
     ws.on('open', () => {
-      // run-task 开始（format/sample_rate 在 parameters，input 空对象）
-      const start = {
+      const startMessage = {
         header: { action: 'run-task', streaming: 'duplex', task_id: taskId },
         payload: {
           model: opts.model,
@@ -145,44 +172,53 @@ export function transcribePcm(
           function: 'recognition'
         }
       }
-      ws.send(JSON.stringify(start))
-      // 分块发 PCM（每块 3200 字节 ≈ 100ms）
-      const CHUNK = 3200
-      for (let i = 0; i < pcm.length; i += CHUNK) {
-        ws.send(pcm.subarray(i, i + CHUNK))
-      }
-      // finish-task
-      const finish = { header: { action: 'finish-task', task_id: taskId }, payload: { input: {} } }
-      ws.send(JSON.stringify(finish))
+      console.log('[stt] DashScope task start', { taskId, model: opts.model, format, sampleRate })
+      ws.send(JSON.stringify(startMessage))
     })
 
     ws.on('message', (data) => {
-      const msg = JSON.parse(data.toString('utf-8'))
+      let msg: {
+        header?: { event?: string; error_message?: string }
+        payload?: { output?: { sentence?: { text?: string } } }
+      }
+      try {
+        msg = JSON.parse(data.toString('utf-8')) as typeof msg
+      } catch {
+        fail('ASR 返回了无法解析的消息')
+        return
+      }
+
       const event = msg.header?.event
-      if (event === 'result-generated') {
+      if (event === 'task-started') {
+        started = true
+        sendAudio()
+      } else if (event === 'result-generated') {
         const text = msg.payload?.output?.sentence?.text
-        if (text) finalText += text
+        if (text) {
+          finalText = text
+          console.log('[stt] DashScope partial result', text)
+        }
       } else if (event === 'task-finished') {
         finished = true
+        settled = true
         clearTimeout(timer)
         ws.close()
         resolve(finalText.trim())
       } else if (event === 'task-failed') {
-        clearTimeout(timer)
-        const err = msg.header?.error_message ?? 'ASR task failed'
-        ws.close()
-        reject(new Error(`ASR 失败：${err}`))
+        fail(`ASR 失败：${msg.header?.error_message ?? 'task failed'}`)
       }
     })
 
     ws.on('error', (err) => {
-      clearTimeout(timer)
-      reject(new Error(`ASR WebSocket 错误：${err.message}`))
+      fail(`ASR WebSocket 错误：${err.message}`)
     })
 
     ws.on('close', () => {
       clearTimeout(timer)
-      if (!finished) reject(new Error('ASR 连接提前关闭'))
+      if (!finished && !settled) {
+        settled = true
+        reject(new Error('ASR 连接提前关闭'))
+      }
     })
   })
 }

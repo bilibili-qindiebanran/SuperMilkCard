@@ -23,6 +23,9 @@ extern "C" {
 #define NET_CFG_HOST_MAX 65
 #define NET_CFG_NAME_MAX 33
 #define NET_CFG_DEVICE_ID_MAX 24
+#define NET_CFG_STT_URL_MAX 160
+#define NET_CFG_STT_KEY_MAX 256
+#define NET_CFG_STT_MODEL_MAX 80
 
 #define NET_CFG_AP_SSID "SuperMilkCard" /* 配网热点名（无密码开放） */
 #define NET_CFG_DEFAULT_TCP_PORT 9000
@@ -35,6 +38,9 @@ typedef struct {
     uint16_t tcp_port;             /* TCP 业务端口 */
     char name[NET_CFG_NAME_MAX];   /* 设备显示名 */
     bool has_ssid;                 /* 是否已保存过网络 */
+    char stt_url[NET_CFG_STT_URL_MAX];
+    char stt_api_key[NET_CFG_STT_KEY_MAX];
+    char stt_model[NET_CFG_STT_MODEL_MAX];
 } net_config_t;
 
 /**
@@ -54,6 +60,9 @@ esp_err_t net_config_save(const net_config_t *cfg);
 
 /** @brief 忘记网络：清空 SSID/密码/主机（保留设备名与端口默认值） */
 esp_err_t net_config_forget(void);
+
+/** @brief 保存/读取 ESP32 直连 STT 配置 */
+esp_err_t net_config_save_stt(const char *url, const char *api_key, const char *model);
 
 /** @brief 设备识别码（基于 MAC，确定性生成；返回内部静态缓冲区） */
 const char *net_config_device_id(void);

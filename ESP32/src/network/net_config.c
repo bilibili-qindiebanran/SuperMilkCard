@@ -18,6 +18,9 @@
 #define KEY_HOST "host"
 #define KEY_PORT "port"
 #define KEY_NAME "name"
+#define KEY_STT_URL "stt_url"
+#define KEY_STT_KEY "stt_key"
+#define KEY_STT_MODEL "stt_model"
 
 static bool s_nvs_ready;
 
@@ -50,6 +53,8 @@ esp_err_t net_config_load(net_config_t *cfg)
     memset(cfg, 0, sizeof(*cfg));
     cfg->tcp_port = NET_CFG_DEFAULT_TCP_PORT;
     snprintf(cfg->name, sizeof(cfg->name), "%s", NET_CFG_DEFAULT_NAME);
+    snprintf(cfg->stt_url, sizeof(cfg->stt_url), "%s", "wss://dashscope.aliyuncs.com/api-ws/v1/inference");
+    snprintf(cfg->stt_model, sizeof(cfg->stt_model), "%s", "qwen-audio-3.0-asr-flash-streaming");
 
     if (!s_nvs_ready) return ESP_OK;
 
@@ -65,6 +70,11 @@ esp_err_t net_config_load(net_config_t *cfg)
     get_str(h, KEY_PASS, cfg->pass, sizeof(cfg->pass));
     get_str(h, KEY_HOST, cfg->host, sizeof(cfg->host));
     get_str(h, KEY_NAME, cfg->name, sizeof(cfg->name));
+    get_str(h, KEY_STT_URL, cfg->stt_url, sizeof(cfg->stt_url));
+    get_str(h, KEY_STT_KEY, cfg->stt_api_key, sizeof(cfg->stt_api_key));
+    get_str(h, KEY_STT_MODEL, cfg->stt_model, sizeof(cfg->stt_model));
+    if (!cfg->stt_url[0]) snprintf(cfg->stt_url, sizeof(cfg->stt_url), "%s", "wss://dashscope.aliyuncs.com/api-ws/v1/inference");
+    if (!cfg->stt_model[0]) snprintf(cfg->stt_model, sizeof(cfg->stt_model), "%s", "qwen-audio-3.0-asr-flash-streaming");
     cfg->has_ssid = cfg->ssid[0] != '\0';
 
     nvs_close(h);
@@ -89,6 +99,19 @@ esp_err_t net_config_save(const net_config_t *cfg)
     return err;
 }
 
+esp_err_t net_config_save_stt(const char *url, const char *api_key, const char *model)
+{
+    if (!s_nvs_ready) return ESP_ERR_INVALID_STATE;
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NET_CFG_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    if (url) nvs_set_str(h, KEY_STT_URL, url);
+    if (api_key) nvs_set_str(h, KEY_STT_KEY, api_key);
+    if (model) nvs_set_str(h, KEY_STT_MODEL, model);
+    err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
 bool net_config_load_and_has_ssid(void)
 {
     net_config_t cfg;

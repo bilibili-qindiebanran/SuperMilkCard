@@ -1,8 +1,8 @@
-# SuperMilkCard ESP32 分区表（16MB Flash，单 app 8MiB）
-# 依据：实际模块 ESP32-S3-WROOM-1-N16R8 = 16MB Flash。
-# 8MiB 应用分区容纳全量 GB2312 中文字体 + 后续资源，仍有充足余量。
-# nvs(64K) + phy_init(4K) + factory(app 8M) = 0x810000，剩余保留。
-# 注意：调整此处需同步 platformio.ini 的 board_build.partitions。
+# SuperMilkCard ESP32 partition table (16MB flash, 8MiB app partition)
+# Target module: ESP32-S3-WROOM-1-N16R8.
+# The 8MiB app partition reserves room for fonts and future assets.
+# nvs (64K) + phy_init (4K) + factory (8M); remaining flash is reserved.
+# Keep this filename synchronized with platformio.ini.
 
 nvs,      data, nvs,     ,        0x10000,
 phy_init, data, phy,     ,        0x1000,

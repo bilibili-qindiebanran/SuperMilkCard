@@ -30,7 +30,7 @@
 #include "net_wifi.h"
 
 #define NET_PORTAL_PORT 80
-#define NET_PORTAL_BODY_BUF 512
+#define NET_PORTAL_BODY_BUF 1024
 #define NET_PORTAL_SCAN_MAX 24
 
 static const char *TAG = "net_portal";
@@ -125,6 +125,12 @@ static const char PORTAL_HTML[] =
     "<input id='port' type='number' value='9000' min='1' max='65535'>"
     "<label for='name'>设备名称</label>"
     "<input id='name' placeholder='奶片助手'>"
+    "<label for='sttUrl'>STT WebSocket 地址</label>"
+    "<input id='sttUrl' value='wss://dashscope.aliyuncs.com/api-ws/v1/inference'>"
+    "<label for='sttKey'>DashScope API Key（仅保存到设备，不回显）</label>"
+    "<input id='sttKey' type='password' placeholder='sk-...'>"
+    "<label for='sttModel'>STT 模型</label>"
+    "<input id='sttModel' value='qwen-audio-3.0-asr-flash-streaming'>"
     "<button class='primary' onclick='save()'>保存并连接</button>"
     "<button class='secondary' onclick='forget()'>忘记网络</button>"
     "<div class='status' id='st'></div>"
@@ -141,14 +147,14 @@ static const char PORTAL_HTML[] =
     "async function scanNetworks(){setStatus('正在扫描…');try{var d=await j('/api/scan');showScan(d.networks||[]);"
     "setStatus('扫描完成。','true')}catch(e){setStatus('扫描失败，请重试。')}}"
     "async function save(){var body={ssid:$('ssid').value.trim(),pass:$('pass').value,host:$('host').value.trim(),"
-    "port:parseInt($('port').value)||9000,name:$('name').value.trim()};"
+    "port:parseInt($('port').value)||9000,name:$('name').value.trim(),sttUrl:$('sttUrl').value.trim(),sttKey:$('sttKey').value,sttModel:$('sttModel').value.trim()};"
     "if(!body.ssid){setStatus('请填写 Wi-Fi 名称。');return}"
     "setStatus('保存并连接中…');try{var d=await j('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});"
     "setStatus(d.ok?'保存成功，设备正在连接 '+d.ssid+' …':'保存失败：'+(d.error||''),d.ok)}catch(e){setStatus('网络请求失败。')}}"
     "async function forget(){setStatus('正在忘记网络…');try{var d=await j('/api/forget',{method:'POST'});"
     "setStatus(d.ok?'已忘记网络，可重新配置。':'失败：'+(d.error||''),d.ok)}catch(e){setStatus('网络请求失败。')}}"
     "async function load(){try{var d=await j('/api/status');if(d.name)$('dev').textContent=d.name;"
-    "if(d.saved&&d.ssid){$('host').value=d.host||'';$('port').value=d.tcpPort||9000;"
+    "if(d.saved&&d.ssid){$('host').value=d.host||'';$('port').value=d.tcpPort||9000;$('sttUrl').value=d.sttUrl||$('sttUrl').value;$('sttModel').value=d.sttModel||$('sttModel').value;"
     "if(d.connected){setStatus('已连接 Wi-Fi：'+d.ssid)}}}catch(e){}}"
     "load();</script></body></html>";
 
@@ -170,7 +176,7 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     net_config_load(&cfg);
 
     /* 只回显已保存配置中的主机/端口/名称，绝不回显密码 */
-    char buf[512];
+    char buf[768];
     size_t pos = 0;
     pos = json_raw(buf, sizeof(buf), pos, "{\"ok\":true,\"name\":\"");
     pos = json_esc_str(buf, sizeof(buf), pos, cfg.name[0] ? cfg.name : NET_CFG_DEFAULT_NAME);
@@ -180,7 +186,11 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     pos = json_esc_str(buf, sizeof(buf), pos, cfg.host);
     pos = json_raw(buf, sizeof(buf), pos, "\",\"tcpPort\":");
     pos = json_int(buf, sizeof(buf), pos, (int)cfg.tcp_port);
-    pos = json_raw(buf, sizeof(buf), pos, net_wifi_is_connected() ? ",\"connected\":true}" : ",\"connected\":false}");
+    pos = json_raw(buf, sizeof(buf), pos, ",\"sttUrl\":\"");
+    pos = json_esc_str(buf, sizeof(buf), pos, cfg.stt_url);
+    pos = json_raw(buf, sizeof(buf), pos, ",\"sttModel\":\"");
+    pos = json_esc_str(buf, sizeof(buf), pos, cfg.stt_model);
+    pos = json_raw(buf, sizeof(buf), pos, net_wifi_is_connected() ? "\",\"connected\":true}" : "\",\"connected\":false}");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send_chunk(req, buf, HTTPD_RESP_USE_STRLEN);
@@ -294,11 +304,12 @@ static esp_err_t api_save_handler(httpd_req_t *req)
     /* 简易 JSON 字段提取（不使用大型 JSON 库，仅按引号键值解析） */
     char ssid[NET_CFG_SSID_MAX] = "", pass[NET_CFG_PASS_MAX] = "";
     char host[NET_CFG_HOST_MAX] = "", name[NET_CFG_NAME_MAX] = "";
+    char stt_url[NET_CFG_STT_URL_MAX] = "", stt_key[NET_CFG_STT_KEY_MAX] = "", stt_model[NET_CFG_STT_MODEL_MAX] = "";
     uint16_t port = NET_CFG_DEFAULT_TCP_PORT;
 
-    const char *keys[] = {"\"ssid\"", "\"pass\"", "\"host\"", "\"name\"", "\"port\""};
-    char *vals[5] = {ssid, pass, host, name, NULL};
-    for (size_t i = 0; i < 5; i++)
+    const char *keys[] = {"\"ssid\"", "\"pass\"", "\"host\"", "\"name\"", "\"port\"", "\"sttUrl\"", "\"sttKey\"", "\"sttModel\""};
+    char *vals[8] = {ssid, pass, host, name, NULL, stt_url, stt_key, stt_model};
+    for (size_t i = 0; i < 8; i++)
     {
         const char *p = strstr(body, keys[i]);
         if (!p) continue;
@@ -330,7 +341,8 @@ static esp_err_t api_save_handler(httpd_req_t *req)
         if (!q) continue;
         q++;
         size_t cap = (i == 1) ? sizeof(pass) : (i == 2) ? sizeof(host)
-                     : (i == 3) ? sizeof(name)
+                     : (i == 3) ? sizeof(name) : (i == 5) ? sizeof(stt_url)
+                     : (i == 6) ? sizeof(stt_key) : (i == 7) ? sizeof(stt_model)
                                 : sizeof(ssid);
         size_t o = 0;
         while (q[o] && q[o] != '"' && o + 1 < cap) o++;
@@ -349,7 +361,8 @@ static esp_err_t api_save_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "save: ssid=%s host=%s port=%u name=%s (password not logged)", ssid, host,
              (unsigned)port, name);
 
-    esp_err_t err = net_wifi_request_connect(ssid, pass, host, port, name);
+    esp_err_t err = net_config_save_stt(stt_url, stt_key, stt_model);
+    if (err == ESP_OK) err = net_wifi_request_connect(ssid, pass, host, port, name);
     if (err != ESP_OK)
     {
         httpd_resp_set_type(req, "application/json");

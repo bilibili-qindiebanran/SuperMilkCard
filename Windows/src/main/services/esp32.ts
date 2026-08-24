@@ -200,7 +200,7 @@ function handleHello(payload: Buffer, cfg: Esp32Config): void {
 }
 
 function handleText(payload: Buffer): void {
-  let msg: { type?: string; content?: string; format?: string; sampleRate?: number; channels?: number; bits?: number }
+  let msg: { type?: string; content?: string; text?: string; message?: string; format?: string; sampleRate?: number; channels?: number; bits?: number }
   try {
     msg = JSON.parse(payload.toString('utf-8')) as typeof msg
   } catch {
@@ -229,6 +229,12 @@ function handleText(payload: Buffer): void {
       break
     case 'chat':
       emitter.emit('text', { content: msg.content ?? '' })
+      break
+    case 'voice_text':
+      emitter.emit('voice-text', { text: msg.text ?? '' })
+      break
+    case 'voice_error':
+      emitter.emit('error', { message: msg.message ?? 'ESP32 STT 失败' })
       break
     case 'live2d_command': {
       const command = (msg as { command?: string }).command
