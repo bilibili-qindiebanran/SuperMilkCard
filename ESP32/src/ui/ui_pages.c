@@ -65,6 +65,7 @@ void ui_pages_create(lv_obj_t *parent)
     lv_obj_set_pos(content_area, 0, 0);
     lv_obj_set_style_bg_opa(content_area, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(content_area, 0, 0);
+    lv_obj_set_style_border_width(content_area, 0, 0);
     lv_obj_clear_flag(content_area, LV_OBJ_FLAG_SCROLLABLE);
     s_content_area = content_area;
 
@@ -81,7 +82,7 @@ void ui_pages_create(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(nav, LV_OPA_90, 0);
     lv_obj_set_style_border_width(nav, 1, 0);
     lv_obj_set_style_border_color(nav, UI_COLOR_BORDER, 0);
-    lv_obj_set_style_pad_all(nav, 6, 0);
+    lv_obj_set_style_pad_all(nav, 0, 0);
     lv_obj_clear_flag(nav, LV_OBJ_FLAG_SCROLLABLE);
     s_nav = nav;
 

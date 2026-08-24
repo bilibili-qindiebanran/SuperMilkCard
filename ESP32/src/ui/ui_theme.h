@@ -27,8 +27,8 @@ extern "C" {
 
 #define UI_RADIUS             16
 #define UI_RADIUS_SMALL       10
-#define UI_MARGIN             16
-#define UI_GAP                12
+#define UI_MARGIN             10
+#define UI_GAP                8
 #define UI_NAV_HEIGHT         56
 #define UI_SCREEN_W           480
 #define UI_SCREEN_H           320

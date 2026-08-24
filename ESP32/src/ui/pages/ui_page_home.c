@@ -24,6 +24,7 @@ static lv_obj_t *s_conn_value;
 static lv_obj_t *s_conn_detail;
 static lv_obj_t *s_home_page;
 static lv_obj_t *s_fps_label;
+static int s_last_audio_bar_value = -1;
 
 static lv_obj_t *card_create(lv_obj_t *parent, lv_coord_t x, lv_coord_t y,
                              lv_coord_t w, lv_coord_t h, bool soft)
@@ -99,7 +100,11 @@ void ui_page_home_refresh(void)
     int bar_value = (int)((state->audio.rms_db + 60.0f) * 100.0f / 60.0f);
     if (bar_value < 0) bar_value = 0;
     if (bar_value > 100) bar_value = 100;
-    lv_bar_set_value(s_audio_bar, bar_value, LV_ANIM_ON);
+    if (bar_value != s_last_audio_bar_value)
+    {
+        lv_bar_set_value(s_audio_bar, bar_value, LV_ANIM_OFF);
+        s_last_audio_bar_value = bar_value;
+    }
 
     update_connection_state(state);
 
@@ -114,39 +119,41 @@ lv_obj_t *ui_page_home_create(lv_obj_t *parent)
     s_home_page = lv_obj_create(parent);
     lv_obj_set_size(s_home_page, UI_SCREEN_W, UI_CONTENT_H);
     lv_obj_set_style_bg_opa(s_home_page, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(s_home_page, 0, 0);
+    lv_obj_set_style_border_width(s_home_page, 0, 0);
     lv_obj_clear_flag(s_home_page, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *title = label_create(s_home_page, UI_STR_STATUS_BAR, UI_MARGIN, 10, UI_COLOR_TEXT);
+    lv_obj_t *title = label_create(s_home_page, UI_STR_STATUS_BAR, UI_MARGIN, 6, UI_COLOR_TEXT);
     ui_theme_apply_title(title);
-    lv_obj_t *subtitle = label_create(s_home_page, UI_STR_HOME_SUBTITLE, UI_MARGIN, 35, UI_COLOR_TEXT_DIM);
+    lv_obj_t *subtitle = label_create(s_home_page, UI_STR_HOME_SUBTITLE, UI_MARGIN, 28, UI_COLOR_TEXT_DIM);
     lv_obj_set_width(subtitle, 330);
     lv_label_set_long_mode(subtitle, LV_LABEL_LONG_WRAP);
 
     lv_obj_t *ready = lv_label_create(s_home_page);
     lv_label_set_text(ready, UI_STR_READY);
-    lv_obj_align(ready, LV_ALIGN_TOP_RIGHT, -UI_MARGIN, 15);
+    lv_obj_align(ready, LV_ALIGN_TOP_RIGHT, -UI_MARGIN, 8);
     ui_theme_apply_status_text(ready, 1);
 
     s_fps_label = lv_label_create(s_home_page);
     lv_label_set_text(s_fps_label, "FPS --");
-    lv_obj_align(s_fps_label, LV_ALIGN_TOP_RIGHT, -UI_MARGIN, 40);
+    lv_obj_align(s_fps_label, LV_ALIGN_TOP_RIGHT, -UI_MARGIN, 32);
     lv_obj_set_style_text_color(s_fps_label, UI_COLOR_TEXT_DIM, 0);
 
-    lv_obj_t *clock_card = card_create(s_home_page, UI_MARGIN, 58, 205, 130, false);
+    lv_obj_t *clock_card = card_create(s_home_page, UI_MARGIN, 50, 205, 130, false);
     label_create(clock_card, UI_STR_TIME_TITLE, UI_GAP, UI_GAP, UI_COLOR_TEXT_DIM);
     s_clock_value = label_create(clock_card, UI_STR_TIME_PLACE, UI_GAP, 42, UI_COLOR_TEXT);
     lv_obj_set_style_text_font(s_clock_value, UI_FONT_DEFAULT, 0);
     s_clock_status = label_create(clock_card, UI_STR_TIME_WAIT, UI_GAP, 95, UI_COLOR_WARN);
     label_create(clock_card, UI_STR_TIME_HINT, UI_GAP, 105, UI_COLOR_TEXT_DIM);
 
-    lv_obj_t *power_card = card_create(s_home_page, 233, 58, 231, 60, true);
+    lv_obj_t *power_card = card_create(s_home_page, 229, 50, 241, 60, true);
     label_create(power_card, UI_STR_POWER_TITLE, UI_GAP, 10, UI_COLOR_TEXT_DIM);
     s_power_value = label_create(power_card, UI_STR_POWER_IDLE, 95, 10, UI_COLOR_TEXT);
     s_power_detail = label_create(power_card, UI_STR_POWER_STABLE, UI_GAP, 36, UI_COLOR_TEXT_DIM);
     lv_obj_set_width(s_power_detail, 205);
     lv_label_set_long_mode(s_power_detail, LV_LABEL_LONG_DOT);
 
-    lv_obj_t *audio_card = card_create(s_home_page, 233, 126, 231, 60, true);
+    lv_obj_t *audio_card = card_create(s_home_page, 229, 116, 241, 60, true);
     label_create(audio_card, UI_STR_AUDIO_TITLE, UI_GAP, 10, UI_COLOR_TEXT_DIM);
     s_audio_value = label_create(audio_card, "-- dB", 95, 10, UI_COLOR_TEXT);
     s_audio_bar = lv_bar_create(audio_card);
@@ -158,7 +165,7 @@ lv_obj_t *ui_page_home_create(lv_obj_t *parent)
     lv_obj_set_style_radius(s_audio_bar, 4, LV_PART_INDICATOR);
     lv_bar_set_range(s_audio_bar, 0, 100);
 
-    lv_obj_t *conn_card = card_create(s_home_page, UI_MARGIN, 196, 286, 56, true);
+    lv_obj_t *conn_card = card_create(s_home_page, UI_MARGIN, 184, 292, 56, true);
     label_create(conn_card, UI_STR_CONN_TITLE, UI_GAP, 9, UI_COLOR_TEXT_DIM);
     s_conn_value = label_create(conn_card, UI_STR_STATE_OFF, 80, 9, UI_COLOR_OFFLINE);
     s_conn_detail = label_create(conn_card, "Wi-Fi 未接入   串口 未接入", UI_GAP, 34, UI_COLOR_TEXT_DIM);
@@ -166,8 +173,8 @@ lv_obj_t *ui_page_home_create(lv_obj_t *parent)
     lv_label_set_long_mode(s_conn_detail, LV_LABEL_LONG_DOT);
 
     lv_obj_t *settings = lv_button_create(s_home_page);
-    lv_obj_set_size(settings, 154, 56);
-    lv_obj_set_pos(settings, 310, 196);
+    lv_obj_set_size(settings, 160, 56);
+    lv_obj_set_pos(settings, 310, 184);
     ui_theme_apply_button(settings, true);
     lv_obj_t *settings_label = lv_label_create(settings);
     lv_label_set_text(settings_label, UI_STR_OPEN_SETTINGS);

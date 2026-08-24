@@ -26,6 +26,7 @@
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "esp_lcd_st77926.h"
@@ -35,7 +36,17 @@ static const char *TAG = "lcd_ui";
 
 static esp_lcd_panel_handle_t s_panel = NULL;
 static esp_lcd_panel_io_handle_t s_io = NULL;
-static uint16_t *s_fb = NULL; /* 全帧缓冲（PSRAM） */
+static uint16_t *s_fb = NULL;
+static SemaphoreHandle_t s_te_sem = NULL;
+
+static void IRAM_ATTR lcd_te_isr_handler(void *arg)
+{
+    (void)arg;
+    if (s_te_sem == NULL) return;
+    BaseType_t high_task_wakeup = pdFALSE;
+    xSemaphoreGiveFromISR(s_te_sem, &high_task_wakeup);
+    if (high_task_wakeup) portYIELD_FROM_ISR();
+} /* 全帧缓冲（PSRAM） */
 
 /* ================================================================== */
 /* AW9364DNR 背光（EN 上升沿计数调光，保持高=20mA 满亮）             */
@@ -91,9 +102,21 @@ esp_err_t lcd_ui_init(void)
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,
     };
     gpio_config(&in_cfg);
+    s_te_sem = xSemaphoreCreateBinary();
+    if (s_te_sem == NULL) return ESP_ERR_NO_MEM;
+    esp_err_t te_isr_err = gpio_install_isr_service(0);
+    if (te_isr_err != ESP_OK && te_isr_err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGW(TAG, "TE ISR service unavailable: %s", esp_err_to_name(te_isr_err));
+    }
+    te_isr_err = gpio_isr_handler_add(LCD_PIN_TE, lcd_te_isr_handler, NULL);
+    if (te_isr_err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "TE ISR handler unavailable: %s", esp_err_to_name(te_isr_err));
+    }
     aw9364_backlight_off();
     gpio_set_level(LCD_PIN_TP_RST, 1);
     gpio_set_level(LCD_PIN_RESET, 1);
@@ -464,20 +487,10 @@ esp_err_t lcd_ui_set_backlight(bool on)
 /* 等待 TE 帧同步（超时放行） */
 esp_err_t lcd_ui_wait_te(uint32_t timeout_ms)
 {
-    static int last = -1;
-    TickType_t start = xTaskGetTickCount();
-    while (1)
-    {
-        int lvl = gpio_get_level(LCD_PIN_TE);
-        if (lvl != last)
-        {
-            last = lvl;
-            return ESP_OK;
-        }
-        if ((xTaskGetTickCount() - start) >= pdMS_TO_TICKS(timeout_ms))
-        {
-            return ESP_ERR_TIMEOUT;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
+    if (s_te_sem == NULL) return ESP_ERR_INVALID_STATE;
+
+    while (xSemaphoreTake(s_te_sem, 0) == pdTRUE) {}
+    return xSemaphoreTake(s_te_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE
+               ? ESP_OK
+               : ESP_ERR_TIMEOUT;
 }

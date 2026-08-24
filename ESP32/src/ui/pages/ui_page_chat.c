@@ -21,6 +21,8 @@ lv_obj_t *ui_page_chat_create(lv_obj_t *parent)
     lv_obj_t *page = lv_obj_create(parent);
     lv_obj_set_size(page, UI_SCREEN_W, UI_CONTENT_H);
     lv_obj_set_style_bg_opa(page, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(page, 0, 0);
+    lv_obj_set_style_border_width(page, 0, 0);
     lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title = lv_label_create(page);

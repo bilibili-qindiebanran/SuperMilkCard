@@ -92,16 +92,22 @@ lv_obj_t *ui_page_settings_create(lv_obj_t *parent)
     s_net_page = page;
     lv_obj_set_size(page, UI_SCREEN_W, UI_CONTENT_H);
     lv_obj_set_style_bg_opa(page, LV_OPA_TRANSP, 0);
-    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(page, 0, 0);
+    lv_obj_set_style_border_width(page, 0, 0);
+    lv_obj_add_flag(page, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(page, LV_DIR_VER);
+    lv_obj_set_scroll_snap_y(page, LV_SCROLL_SNAP_NONE);
+    lv_obj_set_style_pad_bottom(page, 24, 0);
+    lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_t *title = lv_label_create(page);
     lv_label_set_text(title, UI_STR_SETTINGS);
-    lv_obj_set_pos(title, UI_MARGIN, 10);
+    lv_obj_set_pos(title, UI_MARGIN, 6);
     ui_theme_apply_title(title);
 
     lv_obj_t *subtitle = lv_label_create(page);
     lv_label_set_text(subtitle, UI_STR_SETTINGS_SUBTITLE);
-    lv_obj_set_pos(subtitle, UI_MARGIN, 35);
+    lv_obj_set_pos(subtitle, UI_MARGIN, 28);
     lv_obj_set_width(subtitle, 360);
     lv_label_set_long_mode(subtitle, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(subtitle, UI_COLOR_TEXT_DIM, 0);
@@ -112,7 +118,7 @@ lv_obj_t *ui_page_settings_create(lv_obj_t *parent)
              info && info->detected ? info->name : UI_STR_UNKNOWN,
              info ? info->i2c_addr : 0);
 
-    lv_obj_t *display_card = card_create(page, UI_MARGIN, 62, 214, 176);
+    lv_obj_t *display_card = card_create(page, UI_MARGIN, 50, 222, 176);
     lv_obj_t *display_title = lv_label_create(display_card);
     lv_label_set_text(display_title, UI_STR_SETTINGS_DISPLAY);
     lv_obj_set_pos(display_title, UI_GAP, UI_GAP);
@@ -122,7 +128,7 @@ lv_obj_t *ui_page_settings_create(lv_obj_t *parent)
     setting_row(display_card, UI_STR_SETTINGS_BL, UI_STR_STATE_ON, 116, 1);
     setting_row(display_card, UI_STR_SETTINGS_FW, "LVGL 9", 150, 1);
 
-    lv_obj_t *device_card = card_create(page, 242, 62, 222, 176);
+    lv_obj_t *device_card = card_create(page, 240, 50, 230, 176);
     lv_obj_t *device_title = lv_label_create(device_card);
     lv_label_set_text(device_title, UI_STR_SETTINGS_DEVICE);
     lv_obj_set_pos(device_title, UI_GAP, UI_GAP);
@@ -131,7 +137,7 @@ lv_obj_t *ui_page_settings_create(lv_obj_t *parent)
     lv_obj_t *device_label = lv_label_create(device_card);
     lv_label_set_text(device_label, device);
     lv_obj_set_pos(device_label, UI_GAP, 52);
-    lv_obj_set_width(device_label, 190);
+    lv_obj_set_width(device_label, 198);
     lv_label_set_long_mode(device_label, LV_LABEL_LONG_WRAP);
 
     lv_obj_t *touch_label = lv_label_create(device_card);
@@ -143,12 +149,12 @@ lv_obj_t *ui_page_settings_create(lv_obj_t *parent)
     lv_obj_t *tip = lv_label_create(device_card);
     lv_label_set_text(tip, UI_STR_SETTINGS_SYNC_HINT);
     lv_obj_set_pos(tip, UI_GAP, 136);
-    lv_obj_set_width(tip, 190);
+    lv_obj_set_width(tip, 198);
     lv_label_set_long_mode(tip, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(tip, UI_COLOR_TEXT_DIM, 0);
 
     /* 网络与配网卡片（整行） */
-    lv_obj_t *net_card = card_create(page, UI_MARGIN, 250, 448, 42);
+    lv_obj_t *net_card = card_create(page, UI_MARGIN, 236, 460, 42);
     lv_obj_t *net_title = lv_label_create(net_card);
     lv_label_set_text(net_title, UI_STR_SETTINGS_NET);
     lv_obj_set_pos(net_title, UI_GAP, 6);
