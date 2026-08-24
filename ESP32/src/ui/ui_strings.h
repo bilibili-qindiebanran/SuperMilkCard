@@ -55,8 +55,8 @@
 #define UI_STR_LIVE2D_CONN   "已连接"
 #define UI_STR_LIVE2D_DISC   "未连接"
 #define UI_STR_LIVE2D_WAIT   "等待状态…"
-#define UI_STR_LIVE2D_RECORD "按住说话"
-#define UI_STR_LIVE2D_RECORDING "录音中…松开发送"
+#define UI_STR_LIVE2D_RECORD "点击录音"
+#define UI_STR_LIVE2D_RECORDING "录音中…点击停止"
 
 /* 语音互动（双模式） */
 #define UI_STR_VOICE_ENTRY   "语音互动"

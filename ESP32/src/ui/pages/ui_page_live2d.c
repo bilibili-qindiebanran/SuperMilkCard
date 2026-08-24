@@ -320,32 +320,30 @@ void ui_page_live2d_return_cb(lv_event_t *event)
 }
 
 /* ------------------------------------------------------------------ */
-/* 交互：按住说话（录音上行 → Windows STT）                            */
+/* 交互：录音（点击开始/停止 → Windows STT）                            */
 /* ------------------------------------------------------------------ */
 
 static lv_obj_t *s_record_btn;
 static lv_obj_t *s_record_label;
 
-static void record_pressed_cb(lv_event_t *event)
-{
-    (void)event;
-    esp_err_t err = audio_voice_start();
-    if (err == ESP_OK)
-    {
-        lv_label_set_text(s_record_label, UI_STR_LIVE2D_RECORDING);
-        app_state_publish_session(APP_MODE_LIVE2D_LINK, APP_SESSION_LINKED_LISTENING, NULL);
-    }
-}
-
-static void record_released_cb(lv_event_t *event)
+static void record_click_cb(lv_event_t *event)
 {
     (void)event;
     if (audio_voice_is_recording())
     {
         audio_voice_stop();
+        lv_label_set_text(s_record_label, UI_STR_LIVE2D_RECORD);
+        app_state_publish_session(APP_MODE_LIVE2D_LINK, APP_SESSION_LINKED_IDLE, NULL);
     }
-    lv_label_set_text(s_record_label, UI_STR_LIVE2D_RECORD);
-    app_state_publish_session(APP_MODE_LIVE2D_LINK, APP_SESSION_LINKED_IDLE, NULL);
+    else
+    {
+        esp_err_t err = audio_voice_start();
+        if (err == ESP_OK)
+        {
+            lv_label_set_text(s_record_label, UI_STR_LIVE2D_RECORDING);
+            app_state_publish_session(APP_MODE_LIVE2D_LINK, APP_SESSION_LINKED_LISTENING, NULL);
+        }
+    }
 }
 
 void ui_page_live2d_show(void)
@@ -427,7 +425,7 @@ lv_obj_t *ui_page_live2d_create(lv_obj_t *parent)
     lv_label_set_long_mode(s_msg_value, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_color(s_msg_value, UI_COLOR_TEXT_DIM, 0);
 
-    /* 按住说话录音按钮（底部状态卡右下角） */
+    /* 录音按钮（底部状态卡右下角，点击开始/停止） */
     s_record_btn = lv_button_create(page);
     lv_obj_set_size(s_record_btn, 110, 38);
     lv_obj_set_pos(s_record_btn, UI_SCREEN_W - UI_MARGIN - 110, UI_SCREEN_H - 56);
@@ -435,8 +433,7 @@ lv_obj_t *ui_page_live2d_create(lv_obj_t *parent)
     s_record_label = lv_label_create(s_record_btn);
     lv_label_set_text(s_record_label, UI_STR_LIVE2D_RECORD);
     lv_obj_center(s_record_label);
-    lv_obj_add_event_cb(s_record_btn, record_pressed_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(s_record_btn, record_released_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(s_record_btn, record_click_cb, LV_EVENT_CLICKED, NULL);
 
     face_apply(APP_EXPR_NEUTRAL);
     return page;

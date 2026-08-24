@@ -1,9 +1,6 @@
 import type { SttTranscribeRequest, SttTranscribeResult } from '@shared/types'
 import { getSettings } from './settings'
-
-function trimSlash(url: string): string {
-  return url.trim().replace(/\/+$/, '')
-}
+import { resolveEndpoint } from './urls'
 
 /** 调用 OpenAI 兼容的 /audio/transcriptions（Whisper），返回文本。 */
 export async function transcribe(req: SttTranscribeRequest): Promise<SttTranscribeResult> {
@@ -15,7 +12,7 @@ export async function transcribe(req: SttTranscribeRequest): Promise<SttTranscri
   if (!apiKey) throw new Error('请先在设置中填写 API Key')
   if (!baseUrl) throw new Error('请先在设置中填写 Base URL')
 
-  const url = `${trimSlash(baseUrl)}/audio/transcriptions`
+  const url = resolveEndpoint(baseUrl, 'transcriptions')
   const audioBuffer = Buffer.from(req.audioBase64, 'base64')
   const mimeType = req.mimeType || 'audio/webm'
 

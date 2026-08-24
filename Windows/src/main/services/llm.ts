@@ -1,14 +1,9 @@
 import type { ChatStreamRequest, EmotionClassifyItem, LlmChunk } from '@shared/types'
 import { getSettings } from './settings'
+import { resolveEndpoint } from './urls'
 
 interface SseChunk {
   choices?: Array<{ delta?: { content?: string } }>
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '')
-  if (/\/chat\/completions$/i.test(trimmed)) return trimmed
-  return `${trimmed}/chat/completions`
 }
 
 /**
@@ -25,7 +20,7 @@ export async function streamChat(
   if (!baseUrl) throw new Error('请先在设置中填写 Base URL')
   if (!model) throw new Error('请先在设置中填写模型名')
 
-  const url = normalizeBaseUrl(baseUrl)
+  const url = resolveEndpoint(baseUrl, 'chat')
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -123,7 +118,7 @@ export async function classifyEmotions(
     lines
   ].join('\n')
 
-  const url = normalizeBaseUrl(baseUrl)
+  const url = resolveEndpoint(baseUrl, 'chat')
   const res = await fetch(url, {
     method: 'POST',
     headers: {
