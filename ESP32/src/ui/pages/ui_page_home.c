@@ -231,16 +231,6 @@ lv_obj_t *ui_page_home_create(lv_obj_t *parent)
     lv_obj_center(settings_label);
     lv_obj_add_event_cb(settings, ui_page_home_settings_event, LV_EVENT_CLICKED, NULL);
 
-    /* 语音互动入口（设置按钮左侧） */
-    lv_obj_t *voice = lv_button_create(s_home_page);
-    lv_obj_set_size(voice, 124, 56);
-    lv_obj_set_pos(voice, 178, 184);
-    ui_theme_apply_button(voice, true);
-    lv_obj_t *voice_label = lv_label_create(voice);
-    lv_label_set_text(voice_label, UI_STR_VOICE_ENTRY);
-    lv_obj_center(voice_label);
-    lv_obj_add_event_cb(voice, ui_page_home_voice_event, LV_EVENT_CLICKED, NULL);
-
     ui_page_home_refresh();
     return s_home_page;
 }
@@ -249,10 +239,4 @@ void ui_page_home_settings_event(lv_event_t *event)
 {
     (void)event;
     ui_pages_show(UI_PAGE_SETTINGS);
-}
-
-void ui_page_home_voice_event(lv_event_t *event)
-{
-    (void)event;
-    ui_pages_show_voice_mode();
 }

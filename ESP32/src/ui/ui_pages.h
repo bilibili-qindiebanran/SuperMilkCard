@@ -13,7 +13,7 @@
 
 #include "lvgl.h"
 
-#include "../../board_keys.h"
+#include "../board_keys.h"
 
 #ifdef __cplusplus
 extern "C" {
