@@ -114,7 +114,13 @@ export const useChatStore = defineStore('chat', {
         void astrbot.sendMessage({
           chatId: this.streamingChatId,
           content: userMsg?.content ?? '',
-          images: userMsg?.images,
+          // 关键：把 Vue reactive 数组转成纯对象再走 IPC，否则 structured clone 报
+          // “An object could not be cloned”，消息发不出去
+          images: userMsg?.images?.map((img) => ({
+            dataUrl: img.dataUrl,
+            mimeType: img.mimeType,
+            name: img.name
+          })),
           systemPromptExtra: settings.live2d.enabled ? live2d.emotionInstruction : ''
         })
         return
