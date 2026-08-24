@@ -34,12 +34,15 @@ extern "C" {
 #define UI_SCREEN_H           320
 #define UI_CONTENT_H          (UI_SCREEN_H - UI_NAV_HEIGHT)
 
+/* 定制中文字体子集：覆盖全部 UI 文案（102 字 + 标点 + ASCII） */
 LV_FONT_DECLARE(lv_font_source_han_sans_sc_16_cjk);
-#define UI_FONT_DEFAULT &lv_font_source_han_sans_sc_16_cjk
+LV_FONT_DECLARE(lv_font_ui_16);
+#define UI_FONT_DEFAULT ui_theme_font()
 LV_FONT_DECLARE(lv_font_montserrat_14);
 #define UI_FONT_SMALL &lv_font_montserrat_14
 
 void ui_theme_init(void);
+const lv_font_t *ui_theme_font(void);
 void ui_theme_apply_card(lv_obj_t *obj);
 void ui_theme_apply_soft_card(lv_obj_t *obj);
 void ui_theme_apply_button(lv_obj_t *obj, bool primary);

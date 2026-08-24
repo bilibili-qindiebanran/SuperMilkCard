@@ -41,6 +41,7 @@ static lv_obj_t *label_create(lv_obj_t *parent, const char *text, lv_coord_t x,
     lv_label_set_text(label, text);
     lv_obj_set_pos(label, x, y);
     lv_obj_set_style_text_color(label, color, 0);
+    lv_obj_set_style_text_font(label, UI_FONT_DEFAULT, 0); /* 中文字体 */
     return label;
 }
 
@@ -124,7 +125,7 @@ lv_obj_t *ui_page_home_create(lv_obj_t *parent)
     s_clock_value = label_create(clock_card, UI_STR_TIME_PLACE, UI_GAP, 42, UI_COLOR_TEXT);
     lv_obj_set_style_text_font(s_clock_value, UI_FONT_DEFAULT, 0);
     s_clock_status = label_create(clock_card, UI_STR_TIME_WAIT, UI_GAP, 95, UI_COLOR_WARN);
-    lv_obj_t *clock_hint = label_create(clock_card, UI_STR_TIME_HINT, UI_GAP, 105, UI_COLOR_TEXT_DIM);
+    label_create(clock_card, UI_STR_TIME_HINT, UI_GAP, 105, UI_COLOR_TEXT_DIM);
 
     lv_obj_t *power_card = card_create(s_home_page, 233, 58, 231, 60, true);
     label_create(power_card, UI_STR_POWER_TITLE, UI_GAP, 10, UI_COLOR_TEXT_DIM);

@@ -9,13 +9,27 @@ static lv_style_t s_card_style;
 static lv_style_t s_soft_card_style;
 static lv_style_t s_primary_button_style;
 static lv_style_t s_secondary_button_style;
+static lv_font_t s_ui_font;
+static bool s_font_ready;
 static bool s_ready;
+
+const lv_font_t *ui_theme_font(void)
+{
+    if (!s_font_ready)
+    {
+        s_ui_font = lv_font_source_han_sans_sc_16_cjk;
+        s_ui_font.fallback = &lv_font_ui_16;
+        s_font_ready = true;
+    }
+    return &s_ui_font;
+}
 
 static void init_card_style(lv_style_t *style, lv_color_t color, lv_opa_t opa)
 {
     lv_style_init(style);
     lv_style_set_bg_color(style, color);
     lv_style_set_bg_opa(style, opa);
+    lv_style_set_text_font(style, UI_FONT_DEFAULT);
     lv_style_set_radius(style, UI_RADIUS);
     lv_style_set_border_width(style, 1);
     lv_style_set_border_color(style, UI_COLOR_BORDER);
@@ -45,6 +59,7 @@ void ui_theme_init(void)
         lv_style_init(&s_primary_button_style);
         lv_style_set_bg_color(&s_primary_button_style, UI_COLOR_PRIMARY);
         lv_style_set_bg_opa(&s_primary_button_style, LV_OPA_COVER);
+        lv_style_set_text_font(&s_primary_button_style, UI_FONT_DEFAULT);
         lv_style_set_text_color(&s_primary_button_style, lv_color_hex(0xFFFFFF));
         lv_style_set_radius(&s_primary_button_style, UI_RADIUS_SMALL);
         lv_style_set_shadow_width(&s_primary_button_style, 8);
@@ -54,6 +69,7 @@ void ui_theme_init(void)
         lv_style_init(&s_secondary_button_style);
         lv_style_set_bg_color(&s_secondary_button_style, UI_COLOR_PRIMARY_SOFT);
         lv_style_set_bg_opa(&s_secondary_button_style, LV_OPA_COVER);
+        lv_style_set_text_font(&s_secondary_button_style, UI_FONT_DEFAULT);
         lv_style_set_text_color(&s_secondary_button_style, UI_COLOR_PRIMARY_DARK);
         lv_style_set_radius(&s_secondary_button_style, UI_RADIUS_SMALL);
         s_ready = true;
@@ -86,6 +102,7 @@ void ui_theme_apply_status_text(lv_obj_t *label, int status)
     lv_color_t color = UI_COLOR_OFFLINE;
     if (status == 1) color = UI_COLOR_SUCCESS;
     else if (status == 2) color = UI_COLOR_WARN;
+    lv_obj_set_style_text_font(label, UI_FONT_DEFAULT, 0);
     lv_obj_set_style_text_color(label, color, 0);
 }
 
