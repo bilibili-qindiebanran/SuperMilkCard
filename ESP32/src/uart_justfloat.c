@@ -19,8 +19,21 @@ static const char *TAG = "uart_jf";
 /* JustFloat 帧尾（VOFA+ 协议） */
 static const uint8_t JUSTFLOAT_TAIL[4] = {0x00, 0x00, 0x80, 0x7F};
 
+/* 输出开关：默认禁用，便于调试期把 UART0 让给日志；联调完成后可恢复 */
+static bool s_enabled = false;
+
+/* 驱动是否已安装（console 占用 UART0 时不再重复安装） */
+static bool s_driver_installed;
+
+void uart_justfloat_set_enabled(bool enabled)
+{
+    s_enabled = enabled;
+    ESP_LOGI(TAG, "JustFloat output %s", enabled ? "enabled" : "disabled");
+}
+
 esp_err_t uart_justfloat_init(void)
 {
+    /* console 已占用 UART0（CONFIG_ESP_CONSOLE_UART_NUM=0）时不重复安装驱动 */
     uart_config_t cfg = {
         .baud_rate = JUSTFLOAT_UART_BAUD,
         .data_bits = UART_DATA_8_BITS,
@@ -30,11 +43,18 @@ esp_err_t uart_justfloat_init(void)
         .source_clk = UART_SCLK_DEFAULT,
     };
     esp_err_t err = uart_driver_install(JUSTFLOAT_UART_NUM, 1024, 1024, 0, NULL, 0);
+    if (err == ESP_ERR_INVALID_ARG || err == ESP_FAIL)
+    {
+        /* 已被占用（console），跳过，JustFloat 保持禁用即可 */
+        ESP_LOGW(TAG, "UART0 already in use (console), JustFloat disabled");
+        return ESP_OK;
+    }
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "uart_driver_install failed: %s", esp_err_to_name(err));
         return err;
     }
+    s_driver_installed = true;
     err = uart_param_config(JUSTFLOAT_UART_NUM, &cfg);
     if (err != ESP_OK)
     {
@@ -55,7 +75,7 @@ esp_err_t uart_justfloat_init(void)
 
 void uart_justfloat_send(const float *data, size_t count)
 {
-    if (data == NULL || count == 0)
+    if (!s_enabled || data == NULL || count == 0)
     {
         return;
     }

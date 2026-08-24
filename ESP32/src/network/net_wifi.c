@@ -1,6 +1,11 @@
 /**
  * @file net_wifi.c
- * @brief Wi-Fi 管理实现（ESP-IDF 6.0.1：AP 切换用 stop/set_mode/start 方式）
+ * @brief Wi-Fi 管理实现（ESP-IDF 6.0.1）
+ *
+ * 模式切换采用「标志位 + 轮询任务」异步执行，避免在配网页 HTTP handler
+ * 或事件回调里直接 stop/set_mode/start（ESP-IDF 6.0.1 在 APSTA→STA 切换
+ * 时的已知脆弱点，曾导致 assert 重启）。连接统一由 WIFI_EVENT_STA_START
+ * 事件触发，不在 esp_wifi_start() 后立即 connect。
  */
 
 #include "net_wifi.h"
@@ -19,6 +24,15 @@
 #include "net_portal.h"
 
 #define NET_WIFI_MAX_RETRY 3 /* 连续失败次数，超过则进入配网 */
+#define NET_WIFI_SWITCH_DELAY_MS 300 /* 切换模式后等待驱动就绪 */
+
+/* 异步切换请求 */
+typedef enum {
+    NET_WIFI_ACT_NONE = 0,
+    NET_WIFI_ACT_GO_PROVISION,   /* 进入 SoftAP 配网（APSTA） */
+    NET_WIFI_ACT_CONNECT_STA,    /* 切回 STA 并连接已保存网络 */
+    NET_WIFI_ACT_FORGET,         /* 忘记网络并回到配网 */
+} net_wifi_act_t;
 
 static const char *TAG = "net_wifi";
 
@@ -28,12 +42,10 @@ static int s_fail_count;
 static esp_netif_t *s_netif_sta;
 static esp_netif_t *s_netif_ap;
 static bool s_sta_ip;            /* 是否已获得 IP */
-
-/* 广播 IP（已连接时用于 Wi-Fi 状态发布；避免依赖全局） */
 static bool s_sta_connected;
 
-void net_wifi_handle_sta_connected(void);
-void net_wifi_handle_sta_disconnected(void);
+/* 异步切换请求（单写单读，无锁：请求方写，轮询任务读并清零） */
+static volatile net_wifi_act_t s_pending_act = NET_WIFI_ACT_NONE;
 
 /* ------------------------------------------------------------------ */
 /* 事件处理                                                           */
@@ -55,8 +67,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     switch (id)
     {
     case WIFI_EVENT_STA_START:
+        /* STA 接口已就绪：如有已保存网络，由这里统一发起连接（而非 start 后立即 connect） */
         if (!s_provisioning && net_config_load_and_has_ssid())
         {
+            ESP_LOGI(TAG, "STA started, connecting saved network");
             esp_wifi_connect();
         }
         break;
@@ -130,9 +144,11 @@ static void ip_event_handler(void *arg, esp_event_base_t base, int32_t id, void 
 }
 
 /* ------------------------------------------------------------------ */
-/* 模式切换                                                           */
+/* 模式切换（异步执行）                                               */
 /* ------------------------------------------------------------------ */
 
+/* 应用 Wi-Fi 模式（stop → set_mode → config → start）。
+ * 不在 start 后立即 connect：由 WIFI_EVENT_STA_START 事件统一发起。 */
 static esp_err_t apply_mode(wifi_mode_t mode, bool with_ap_config)
 {
     esp_err_t err = esp_wifi_stop();
@@ -174,10 +190,54 @@ static esp_err_t apply_mode(wifi_mode_t mode, bool with_ap_config)
     {
         s_provisioning = false;
         s_fail_count = 0;
-        if (net_config_load_and_has_ssid()) esp_wifi_connect();
         publish_conn_state();
     }
     return ESP_OK;
+}
+
+/* 处理异步切换请求（轮询任务调用；避免在 HTTP/事件回调里直接动 Wi-Fi） */
+static void process_pending_act(void)
+{
+    net_wifi_act_t act = s_pending_act;
+    if (act == NET_WIFI_ACT_NONE) return;
+    s_pending_act = NET_WIFI_ACT_NONE;
+
+    switch (act)
+    {
+    case NET_WIFI_ACT_GO_PROVISION:
+        if (!s_provisioning)
+        {
+            ESP_LOGI(TAG, "async: enter provisioning");
+            apply_mode(WIFI_MODE_APSTA, true);
+        }
+        break;
+    case NET_WIFI_ACT_CONNECT_STA:
+        ESP_LOGI(TAG, "async: switch to STA and connect");
+        apply_mode(WIFI_MODE_STA, false); /* 连接由 STA_START 事件发起 */
+        break;
+    case NET_WIFI_ACT_FORGET:
+        if (net_config_forget() != ESP_OK)
+        {
+            ESP_LOGE(TAG, "async: forget failed");
+            break;
+        }
+        apply_mode(WIFI_MODE_APSTA, true);
+        break;
+    default:
+        break;
+    }
+}
+
+/* 轮询任务：以低优先级处理异步切换请求 */
+static void wifi_worker_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "wifi worker task started");
+    while (1)
+    {
+        process_pending_act();
+        vTaskDelay(pdMS_TO_TICKS(NET_WIFI_SWITCH_DELAY_MS));
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -212,6 +272,9 @@ esp_err_t net_wifi_start(void)
 
     s_started = true;
 
+    if (xTaskCreate(wifi_worker_task, "wifi_worker", 4096, NULL, 3, NULL) != pdPASS)
+        return ESP_ERR_NO_MEM;
+
     net_config_t nc;
     net_config_load(&nc);
     if (nc.has_ssid)
@@ -231,8 +294,9 @@ bool net_wifi_is_provisioning(void)
 esp_err_t net_wifi_start_provisioning(void)
 {
     if (s_provisioning) return ESP_OK;
-    ESP_LOGI(TAG, "manual provisioning start");
-    return apply_mode(WIFI_MODE_APSTA, true);
+    ESP_LOGI(TAG, "manual provisioning request");
+    s_pending_act = NET_WIFI_ACT_GO_PROVISION;
+    return ESP_OK;
 }
 
 esp_err_t net_wifi_request_connect(const char *ssid, const char *pass,
@@ -258,17 +322,15 @@ esp_err_t net_wifi_request_connect(const char *ssid, const char *pass,
     esp_err_t err = net_config_save(&cfg);
     if (err != ESP_OK) return err;
 
-    /* 从配网模式切回 STA 连接 */
-    if (s_provisioning) return apply_mode(WIFI_MODE_STA, false);
-    return esp_wifi_connect();
+    /* 异步切回 STA（由 wifi_worker 执行，避免在 HTTP handler 里切换 Wi-Fi） */
+    s_pending_act = NET_WIFI_ACT_CONNECT_STA;
+    return ESP_OK;
 }
 
 esp_err_t net_wifi_forget(void)
 {
-    esp_err_t err = net_config_forget();
-    if (err != ESP_OK) return err;
-    if (s_provisioning) return ESP_OK;
-    return apply_mode(WIFI_MODE_APSTA, true);
+    s_pending_act = NET_WIFI_ACT_FORGET; /* 清 NVS + 回配网 由 worker 异步完成 */
+    return ESP_OK;
 }
 
 bool net_wifi_is_connected(void)
