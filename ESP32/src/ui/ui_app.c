@@ -22,6 +22,8 @@
 #include "touch.h"
 #include "ui_pages.h"
 #include "pages/ui_page_home.h"
+#include "pages/ui_page_live2d.h"
+#include "pages/ui_page_settings.h"
 #include "ui_port_display.h"
 #include "ui_port_input.h"
 #include "ui_theme.h"
@@ -32,6 +34,8 @@ static void ui_state_refresh_cb(lv_timer_t *timer)
 {
     (void)timer;
     ui_page_home_refresh();
+    ui_page_settings_refresh();
+    ui_page_live2d_refresh();
 }
 
 /* LVGL 心跳（周期调用 lv_tick_inc） */

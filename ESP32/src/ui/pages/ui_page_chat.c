@@ -1,12 +1,20 @@
 /**
  * @file ui_page_chat.c
- * @brief 聊天页：Fluent 2 数据源占位卡片
+ * @brief 聊天页：Fluent 2 数据源占位卡片 + Live2D 互动入口
  */
 
 #include "lvgl.h"
 
+#include "../ui_pages.h"
 #include "../ui_strings.h"
 #include "../ui_theme.h"
+
+/* 进入全屏 Live2D 互动页 */
+static void chat_enter_live2d_cb(lv_event_t *event)
+{
+    (void)event;
+    ui_pages_show_live2d();
+}
 
 lv_obj_t *ui_page_chat_create(lv_obj_t *parent)
 {
@@ -53,5 +61,16 @@ lv_obj_t *ui_page_chat_create(lv_obj_t *parent)
     lv_label_set_text(status, UI_STR_STATE_OFF);
     lv_obj_align(status, LV_ALIGN_BOTTOM_RIGHT, -UI_GAP, -UI_GAP);
     ui_theme_apply_status_text(status, 0);
+
+    /* Live2D 互动入口按钮 */
+    lv_obj_t *live2d_btn = lv_button_create(page);
+    lv_obj_set_size(live2d_btn, 200, 44);
+    lv_obj_align(live2d_btn, LV_ALIGN_BOTTOM_LEFT, UI_MARGIN, -UI_GAP);
+    ui_theme_apply_button(live2d_btn, true);
+    lv_obj_t *live2d_label = lv_label_create(live2d_btn);
+    lv_label_set_text(live2d_label, UI_STR_CHAT_ENTER_LIVE2D);
+    lv_obj_center(live2d_label);
+    lv_obj_add_event_cb(live2d_btn, chat_enter_live2d_cb, LV_EVENT_CLICKED, NULL);
+
     return page;
 }

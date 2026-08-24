@@ -7,6 +7,7 @@
 
 #include "pages/ui_page_chat.h"
 #include "pages/ui_page_home.h"
+#include "pages/ui_page_live2d.h"
 #include "pages/ui_page_music.h"
 #include "pages/ui_page_settings.h"
 #include "ui_strings.h"
@@ -14,6 +15,9 @@
 
 static lv_obj_t *s_pages[UI_PAGE_COUNT];
 static lv_obj_t *s_nav_btns[UI_PAGE_COUNT];
+static lv_obj_t *s_content_area;
+static lv_obj_t *s_nav;
+static lv_obj_t *s_live2d_page;
 static ui_page_id_t s_current = UI_PAGE_HOME;
 
 static lv_obj_t *(*const s_page_creators[UI_PAGE_COUNT])(lv_obj_t *) = {
@@ -62,6 +66,7 @@ void ui_pages_create(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(content_area, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(content_area, 0, 0);
     lv_obj_clear_flag(content_area, LV_OBJ_FLAG_SCROLLABLE);
+    s_content_area = content_area;
 
     for (int i = 0; i < UI_PAGE_COUNT; i++)
     {
@@ -78,6 +83,7 @@ void ui_pages_create(lv_obj_t *parent)
     lv_obj_set_style_border_color(nav, UI_COLOR_BORDER, 0);
     lv_obj_set_style_pad_all(nav, 6, 0);
     lv_obj_clear_flag(nav, LV_OBJ_FLAG_SCROLLABLE);
+    s_nav = nav;
 
     lv_coord_t button_width = UI_SCREEN_W / UI_PAGE_COUNT;
     for (int i = 0; i < UI_PAGE_COUNT; i++)
@@ -95,6 +101,10 @@ void ui_pages_create(lv_obj_t *parent)
         s_nav_btns[i] = button;
     }
     update_nav_style();
+
+    /* 全屏 Live2D 互动页（覆盖整个屏幕，默认隐藏） */
+    s_live2d_page = ui_page_live2d_create(parent);
+    lv_obj_add_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
 }
 
 void ui_pages_show(ui_page_id_t id)
@@ -112,4 +122,28 @@ void ui_pages_show(ui_page_id_t id)
 ui_page_id_t ui_pages_current(void)
 {
     return s_current;
+}
+
+void ui_pages_show_live2d(void)
+{
+    if (s_live2d_page == NULL) return;
+    /* 隐藏常规内容区与底部导航 */
+    if (s_content_area) lv_obj_add_flag(s_content_area, LV_OBJ_FLAG_HIDDEN);
+    if (s_nav) lv_obj_add_flag(s_nav, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < UI_PAGE_COUNT; i++) lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
+    ui_page_live2d_show();
+}
+
+void ui_pages_return_home(void)
+{
+    if (s_live2d_page) lv_obj_add_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
+    if (s_content_area) lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_HIDDEN);
+    if (s_nav) lv_obj_clear_flag(s_nav, LV_OBJ_FLAG_HIDDEN);
+    ui_pages_show(UI_PAGE_HOME);
+}
+
+bool ui_pages_live2d_active(void)
+{
+    return s_live2d_page && !lv_obj_has_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
 }
