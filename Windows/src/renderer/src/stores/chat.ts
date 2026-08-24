@@ -19,6 +19,11 @@ function uid(): string {
   return `${Date.now().toString(36)}-${seq.toString(36)}`
 }
 
+/** 去掉情绪/动作标签后的纯文本（作为 ESP32 摘要预览） */
+function cleanLive2dPreview(content: string): string {
+  return content.replace(/\[(?:emotion|action):[^\]]*\]/g, '').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export const useChatStore = defineStore('chat', {
   state: () => ({
     history: [] as ChatMessage[],
@@ -120,13 +125,20 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /** 从流式内容中解析情绪/动作标签并驱动 Live2D */
+    /** 从流式内容中解析情绪/动作标签并驱动 Live2D，同时发布到 ESP32 */
     dispatchEmotion(content: string): void {
       const { emotion, actions } = extractEmotionTags(content)
       const live2d = useLive2dStore()
+      const esp32 = useEsp32Store()
       if (emotion && emotion !== this.lastEmotion) {
         this.lastEmotion = emotion
         void live2d.triggerEmotion(emotion)
+        // 同步到 ESP32 简易互动终端（未知情绪由 ESP32 回退 neutral）
+        void esp32.sendLive2dState({
+          expression: emotion,
+          motion: 'speaking',
+          messagePreview: content.replace(/\[(?:emotion|action):[^\]]*\]/g, '').trim()
+        })
       }
       for (const action of actions) {
         if (!this.triggeredActions.includes(action)) {
@@ -138,7 +150,18 @@ export const useChatStore = defineStore('chat', {
 
     handleDone(e: LlmDone): void {
       if (e.chatId !== this.streamingChatId) return
-      if (e.fullText.trim()) void useEsp32Store().sendChat('assistant', e.fullText.trim())
+      const esp32 = useEsp32Store()
+      if (e.fullText.trim()) {
+        void esp32.sendChat('assistant', e.fullText.trim())
+        // 回复完成后同步最终摘要（保留情绪，动作回 idle）
+        const lastMsg = this.history.find((m) => m.id === this.streamingMessageId)
+        const finalText = lastMsg ? cleanLive2dPreview(lastMsg.content) : e.fullText.trim()
+        void esp32.sendLive2dState({
+          expression: this.lastEmotion || 'neutral',
+          motion: 'idle',
+          messagePreview: finalText
+        })
+      }
       this.finishStream()
     },
 
