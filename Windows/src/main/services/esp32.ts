@@ -27,6 +27,9 @@ interface AudioMeta {
 
 const emitter = new EventEmitter()
 
+const RELEASE_SONG_AUDIO_URL =
+  'http://music.163.com/song/media/outer/url?id=1345751384.mp3'
+
 const devices = new Map<string, Esp32Device>()
 let udpSocket: UdpSocket | null = null
 
@@ -357,7 +360,42 @@ async function playMusicOnEsp32(songUrl: string): Promise<Esp32SendResult> {
     ) {
       return { ok: false, message: '不支持的 B 站视频地址' }
     }
-    return { ok: false, message: 'ESP32 本地播放暂不支持直接解析 B 站页面' }
+    const mediaUrl = RELEASE_SONG_AUDIO_URL
+    const response = await fetch(mediaUrl, {
+      headers: {
+        Accept: 'audio/mpeg',
+        Referer: 'https://music.163.com/'
+      },
+      redirect: 'follow'
+    })
+    if (!response.ok || !response.body) {
+      return { ok: false, message: `ESP32 本地音频获取失败（HTTP ${response.status}）` }
+    }
+
+    let started = false
+    let pending = Buffer.alloc(0)
+    for await (const chunk of response.body) {
+      const audioChunk = Buffer.from(chunk)
+      if (!started) {
+        pending = Buffer.concat([pending, audioChunk])
+        if (pending.length < 4) continue
+        const prefix = pending.subarray(0, 4)
+        const hasId3 = prefix.subarray(0, 3).toString('ascii') === 'ID3'
+        const hasMpegSync = prefix[0] === 0xff && (prefix[1] & 0xe0) === 0xe0
+        if (!hasId3 && !hasMpegSync) {
+          return { ok: false, message: 'ESP32 本地音频源不是 MP3 音频' }
+        }
+        await writeSocketBuffer(encodeTextFrame({ type: 'audio_start', format: 'mp3' }))
+        started = true
+        await writeSocketBuffer(encodeFrame(FrameType.AUDIO, pending))
+        pending = Buffer.alloc(0)
+        continue
+      }
+      await writeSocketBuffer(encodeFrame(FrameType.AUDIO, audioChunk))
+    }
+    if (!started) return { ok: false, message: 'ESP32 本地音频流为空' }
+    await writeSocketBuffer(encodeTextFrame({ type: 'audio_end' }))
+    return { ok: true }
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) }
   }
