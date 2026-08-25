@@ -266,20 +266,35 @@ static bool body_appendf(char *buf, size_t cap, size_t *pos, const char *fmt, ..
 /* 追加 JSON 字符串字段值（对 '"' 与 '\' 转义），容量不足返回 false */
 static bool body_append_escaped(char *buf, size_t cap, size_t *pos, const char *s)
 {
-    for (const char *p = s; *p; p++)
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++)
     {
-        char c = *p;
-        if (c == '"' || c == '\\')
+        const char *escape = NULL;
+        char unicode_escape[7];
+        switch (*p)
         {
-            if (*pos + 2 >= cap) return false;
-            buf[*pos] = '\\';
-            buf[*pos + 1] = c;
-            *pos += 2;
+        case '"': escape = "\\\""; break;
+        case '\\': escape = "\\\\"; break;
+        case '\n': escape = "\\n"; break;
+        case '\r': escape = "\\r"; break;
+        case '\t': escape = "\\t"; break;
+        default: break;
+        }
+        if (*p < 0x20 && !escape)
+        {
+            snprintf(unicode_escape, sizeof(unicode_escape), "\\u%04x", *p);
+            escape = unicode_escape;
+        }
+        if (escape)
+        {
+            size_t len = strlen(escape);
+            if (*pos + len >= cap) return false;
+            memcpy(buf + *pos, escape, len);
+            *pos += len;
         }
         else
         {
             if (*pos + 1 >= cap) return false;
-            buf[*pos] = c;
+            buf[*pos] = (char)*p;
             *pos += 1;
         }
     }
