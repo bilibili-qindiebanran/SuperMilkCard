@@ -44,7 +44,9 @@ static void send_voice_text(const char *text)
     char json[TEXT_MAX * 2 + 64];
     json_escape(escaped, sizeof(escaped), text);
     snprintf(json, sizeof(json), "{\"type\":\"voice_text\",\"text\":\"%s\"}", escaped);
-    net_tcp_send_json(json);
+    esp_err_t err = net_tcp_send_json(json);
+    ESP_LOGI(TAG, "voice_text sent: bytes=%u result=%s", (unsigned)strlen(json),
+             esp_err_to_name(err));
 }
 
 static void voice_task(void *arg)

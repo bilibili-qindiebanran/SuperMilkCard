@@ -76,18 +76,30 @@ static void frame_header(uint8_t *hdr, uint8_t type, uint32_t len)
     hdr[6] = (uint8_t)(len & 0xFF);
 }
 
+static esp_err_t send_all(int fd, const uint8_t *data, size_t len)
+{
+    size_t offset = 0;
+    while (offset < len)
+    {
+        int sent = send(fd, data + offset, len - offset, 0);
+        if (sent <= 0)
+        {
+            ESP_LOGW(TAG, "send failed fd=%d offset=%u/%u errno=%d",
+                     fd, (unsigned)offset, (unsigned)len, errno);
+            return ESP_FAIL;
+        }
+        offset += (size_t)sent;
+    }
+    return ESP_OK;
+}
+
 static esp_err_t send_frame(int fd, uint8_t type, const uint8_t *payload, uint32_t len)
 {
     uint8_t hdr[FRAME_HEADER_LEN];
     frame_header(hdr, type, len);
 
-    int sent = send(fd, hdr, sizeof(hdr), 0);
-    if (sent != (int)sizeof(hdr)) return ESP_FAIL;
-    if (len > 0 && payload)
-    {
-        sent = send(fd, payload, len, 0);
-        if (sent != (int)len) return ESP_FAIL;
-    }
+    if (send_all(fd, hdr, sizeof(hdr)) != ESP_OK) return ESP_FAIL;
+    if (len > 0 && payload && send_all(fd, payload, len) != ESP_OK) return ESP_FAIL;
     return ESP_OK;
 }
 
@@ -243,6 +255,8 @@ static void client_session(int fd)
         int r = recv(fd, buf, NET_TCP_RECV_BUF, 0);
         if (r <= 0)
         {
+            if (!(r < 0 && errno == EAGAIN))
+                ESP_LOGW(TAG, "client recv closed fd=%d r=%d errno=%d", fd, r, errno);
             if (r < 0 && errno == EAGAIN) continue; /* 超时：继续轮询 */
             break; /* 对端关闭或出错 */
         }

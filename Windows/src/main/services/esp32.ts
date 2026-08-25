@@ -136,9 +136,11 @@ function openTcp(host: string, port: number, cfg: Esp32Config): void {
   })
   sock.on('data', (chunk: Buffer) => handleData(chunk, cfg))
   sock.on('error', (err) => {
+    console.warn('[esp32] TCP socket error:', err.message)
     setStatus('error', err.message, false)
   })
-  sock.on('close', () => {
+  sock.on('close', (hadError) => {
+    console.warn('[esp32] TCP socket closed:', { hadError, manuallyDisconnected })
     if (socket === sock) socket = null
     decoder.reset()
     audioMeta = null
