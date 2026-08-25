@@ -84,6 +84,7 @@ esp_err_t i2s_audio_init(void)
     i2s_std_slot_config_t slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
         I2S_DATA_BIT_WIDTH_24BIT, I2S_SLOT_MODE_STEREO);
     slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT; /* 保持 64 BCLK/帧 */
+    slot_cfg.ws_width = 32; /* Match the complete 32-bit half-frame. */
 
     /* 单份 GPIO 配置：BCLK=17, WS=8, DOUT=7（功放）, DIN=18（麦克风） */
     i2s_std_gpio_config_t gpio_cfg = {
@@ -234,7 +235,7 @@ esp_err_t i2s_audio_write_pcm16(const int16_t *pcm, size_t samples, uint8_t chan
             size_t frames = input_samples > 512 ? 512 : input_samples;
             for (size_t i = 0; i < frames; i++)
             {
-                int32_t sample = (int32_t)pcm[offset + i] / 4;
+                int32_t sample = ((int32_t)pcm[offset + i] / 4) << 8;
                 tx_buf[i * 2] = sample;
                 tx_buf[i * 2 + 1] = sample;
             }
@@ -246,7 +247,7 @@ esp_err_t i2s_audio_write_pcm16(const int16_t *pcm, size_t samples, uint8_t chan
         {
             size_t write_samples = input_samples > 1024 ? 1024 : input_samples;
             for (size_t i = 0; i < write_samples; i++)
-                tx_buf[i] = (int32_t)pcm[offset + i] / 4;
+                tx_buf[i] = ((int32_t)pcm[offset + i] / 4) << 8;
             esp_err_t err = i2s_audio_write(tx_buf, write_samples);
             if (err != ESP_OK) return err;
             offset += write_samples;
