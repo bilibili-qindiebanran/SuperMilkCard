@@ -467,8 +467,7 @@ static llm_role_result_t do_request(const char *user_text, char *reply_out, size
 
     if (status >= 200 && status < 300)
     {
-        char reply[LLM_ROLE_REPLY_MAX];
-        if (!parse_content(collect.buf, reply, sizeof(reply)))
+        if (!parse_content(collect.buf, reply_out, reply_cap))
         {
             ESP_LOGW(TAG, "no choices[0].message.content in response");
             free(resp_buf);
@@ -476,9 +475,8 @@ static llm_role_result_t do_request(const char *user_text, char *reply_out, size
         }
         free(resp_buf);
 
-        /* 成功：写入 assistant 历史，返回回复文本 */
-        hist_add(reply, false);
-        truncate_utf8(reply_out, reply_cap, reply, reply_cap - 1);
+        /* 成功：写入 assistant 历史，回复文本已经写入 PSRAM 缓冲区。 */
+        hist_add(reply_out, false);
         return LLM_ROLE_OK;
     }
 
@@ -520,22 +518,30 @@ static void fill_error_detail(llm_role_result_t r, const char *extra)
 static void llm_role_task(void *arg)
 {
     (void)arg;
+    char *reply = heap_caps_malloc(LLM_ROLE_REPLY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!reply)
+    {
+        ESP_LOGE(TAG, "worker reply buffer allocation failed");
+        vTaskDelete(NULL);
+        return;
+    }
+
     while (1)
     {
         if (!lock_take(pdMS_TO_TICKS(50))) continue;
         bool has_job = s_busy;
         if (has_job)
         {
-            char user_text[LLM_ROLE_MSG_MAX];
-            snprintf(user_text, sizeof(user_text), "%s", s_pending_user);
+            /* s_busy 保持为 true 期间不会有新的 start_chat 改写该缓冲区，
+             * 因此直接使用共享文本，避免在任务栈上复制 4KB。 */
+            const char *user_text = s_pending_user;
             lock_give();
 
             s_cancel = false;
-            char reply[LLM_ROLE_REPLY_MAX];
             char detail[LLM_ROLE_DETAIL_MAX];
-            detail[0] = '\0';
+            detail[0] = 0;
 
-            llm_role_result_t r = do_request(user_text, reply, sizeof(reply));
+            llm_role_result_t r = do_request(user_text, reply, LLM_ROLE_REPLY_MAX);
             if (s_cancel) r = LLM_ROLE_ERR_NETWORK;
 
             lock_take(pdMS_TO_TICKS(100));
