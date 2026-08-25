@@ -10,7 +10,9 @@
 #include "esp_netif.h"
 
 #include "net_config.h"
+#include "net_portal.h"
 #include "net_tcp.h"
+#include "net_time.h"
 #include "net_wifi.h"
 
 static const char *TAG = "net_app";
@@ -41,6 +43,15 @@ esp_err_t net_app_start(void)
         return err;
     }
 
+    /* 配置网页常驻：设备启动即监听 80 端口（SoftAP 配网与 STA 局域网均可访问）。
+     * net_portal_start() 幂等；AP/STA 反复切换不会重复启动 server。 */
+    err = net_portal_start();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "net_portal_start failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
     /* TCP 服务端任务先启动：无论 STA/AP 都能监听（AP 网段也可直连调试） */
     err = net_tcp_start();
     if (err != ESP_OK)
@@ -55,6 +66,13 @@ esp_err_t net_app_start(void)
     {
         ESP_LOGE(TAG, "net_wifi_start failed: %s", esp_err_to_name(err));
         return err;
+    }
+
+    /* 时间同步：SNTP 待 Wi-Fi 就绪后自动开始（首页时钟 + WSS TLS 证书校验） */
+    err = net_time_init();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "net_time_init failed: %s", esp_err_to_name(err));
     }
 
     ESP_LOGI(TAG, "network started (device id=%s)", net_config_device_id());

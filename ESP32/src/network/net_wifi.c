@@ -22,6 +22,7 @@
 #include "../ui/app_state.h"
 #include "net_config.h"
 #include "net_portal.h"
+#include "net_time.h"
 
 #define NET_WIFI_MAX_RETRY 3 /* 连续失败次数，超过则进入配网 */
 #define NET_WIFI_SWITCH_DELAY_MS 300 /* 切换模式后等待驱动就绪 */
@@ -110,11 +111,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         s_sta_connected = false;
         ESP_LOGI(TAG, "SoftAP started: %s (open)", NET_CFG_AP_SSID);
         publish_conn_state();
-        net_portal_start(); /* 配网模式打开配网页 */
+        net_portal_start(); /* 配网模式打开配网页（幂等，服务常驻） */
         break;
 
     case WIFI_EVENT_AP_STOP:
-        net_portal_stop();
+        /* 配置网页常驻：AP 停止不关闭 HTTP 服务（STA 局域网仍需访问）。 */
         break;
 
     default:
@@ -134,6 +135,7 @@ static void ip_event_handler(void *arg, esp_event_base_t base, int32_t id, void 
         s_sta_connected = true;
         ESP_LOGI(TAG, "STA got IP: " IPSTR, IP2STR(&e->ip_info.ip));
         publish_conn_state();
+        net_time_on_ip_got(); /* 网络就绪：确保 SNTP 同步任务被拉起 */
     }
     else if (id == IP_EVENT_STA_LOST_IP)
     {
@@ -336,4 +338,17 @@ esp_err_t net_wifi_forget(void)
 bool net_wifi_is_connected(void)
 {
     return s_sta_connected && s_sta_ip;
+}
+
+bool net_wifi_get_sta_ip(char *out, size_t out_size)
+{
+    if (out == NULL || out_size == 0) return false;
+    out[0] = '\0';
+
+    if (!s_sta_ip || s_netif_sta == NULL) return false;
+
+    esp_netif_ip_info_t ip;
+    if (esp_netif_get_ip_info(s_netif_sta, &ip) != ESP_OK) return false;
+
+    return esp_ip4addr_ntoa(&ip.ip, out, (int)out_size) != NULL;
 }
