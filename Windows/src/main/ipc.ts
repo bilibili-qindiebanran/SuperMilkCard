@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, shell } from 'electron'
 import type {
   ApiKeySection,
   ApiKeyTestRequest,
@@ -11,6 +11,7 @@ import type {
   SttTranscribeRequest,
   TtsSynthesizeRequest
 } from '@shared/types'
+import type { Esp32MusicCommand } from '@shared/types'
 import { toPublicSettings } from '@shared/types'
 import { getSettings, setSettings, resetSettings } from './services/settings'
 import { streamChat, classifyEmotions } from './services/llm'
@@ -36,6 +37,22 @@ import {
 } from './services/perfMonitor'
 
 const active = new Map<string, AbortController>()
+const RELEASE_SONG_URL =
+  'https://music.163.com/song?id=1345751384&uct2=U2FsdGVkX1+vHXtdBH5HmrUwnNHS+as3wzJtHMsaU78='
+
+function isAllowedMusicUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (
+      url.protocol === 'https:' &&
+      url.hostname === 'music.163.com' &&
+      url.pathname === '/song' &&
+      url.searchParams.get('id') === '1345751384'
+    )
+  } catch {
+    return false
+  }
+}
 
 /** 丢弃渲染层补丁中的 apiKey / hasApiKey，避免把状态性/敏感字段写入主进程配置 */
 function normalizePatch(partial: SettingsPatch): Partial<AppSettings> {
@@ -201,6 +218,13 @@ export function registerIpc(): void {
   esp32Emitter.on('text', (m) => broadcast('esp32:text', m))
   esp32Emitter.on('voice-text', (m) => broadcast('esp32:voice-text', m))
   esp32Emitter.on('live2d-command', (c) => broadcast('esp32:live2d-command', c))
+  esp32Emitter.on('music-play', (command: Esp32MusicCommand) => {
+    if (!isAllowedMusicUrl(command.url)) {
+      console.warn('[esp32] ignored unsupported music URL:', command.url)
+      return
+    }
+    void shell.openExternal(RELEASE_SONG_URL)
+  })
   esp32Emitter.on('error', (m) => broadcast('esp32:error', m))
   perfEmitter.on('sample', (s) => broadcast('perf:sample', s))
 }

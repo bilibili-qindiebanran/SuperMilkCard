@@ -5,6 +5,7 @@ import type {
   Esp32Config,
   Esp32Device,
   Esp32Live2dState,
+  Esp32MusicCommand,
   Esp32SendResult,
   Esp32Status,
   Esp32ConnectionState
@@ -200,7 +201,18 @@ function handleHello(payload: Buffer, cfg: Esp32Config): void {
 }
 
 function handleText(payload: Buffer): void {
-  let msg: { type?: string; content?: string; text?: string; message?: string; format?: string; sampleRate?: number; channels?: number; bits?: number }
+  let msg: {
+    type?: string
+    content?: string
+    text?: string
+    message?: string
+    title?: string
+    url?: string
+    format?: string
+    sampleRate?: number
+    channels?: number
+    bits?: number
+  }
   try {
     msg = JSON.parse(payload.toString('utf-8')) as typeof msg
   } catch {
@@ -241,6 +253,12 @@ function handleText(payload: Buffer): void {
       if (command === 'enter' || command === 'return_home' || command === 'reconnect') {
         emitter.emit('live2d-command', { command })
       }
+      break
+    }
+    case 'music_play': {
+      const title = typeof msg.title === 'string' ? msg.title : ''
+      const url = typeof msg.url === 'string' ? msg.url : ''
+      if (title && url) emitter.emit('music-play', { title, url } satisfies Esp32MusicCommand)
       break
     }
     default:

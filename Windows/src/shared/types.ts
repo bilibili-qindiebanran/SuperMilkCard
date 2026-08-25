@@ -173,6 +173,12 @@ export interface Esp32Live2dCommand {
   command: 'enter' | 'return_home' | 'reconnect'
 }
 
+/** ESP32 请求 Windows 打开指定的网易云音乐歌曲 */
+export interface Esp32MusicCommand {
+  title: string
+  url: string
+}
+
 export type ThemeMode = 'light' | 'dark'
 
 /** 可经 IPC 下发到渲染层的密钥部分（用于设置 Key / 清除 Key） */
