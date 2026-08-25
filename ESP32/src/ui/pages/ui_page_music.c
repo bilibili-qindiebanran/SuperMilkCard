@@ -5,8 +5,31 @@
 
 #include "lvgl.h"
 
+#include "../../network/net_tcp.h"
+#include "../app_state.h"
 #include "../ui_strings.h"
 #include "../ui_theme.h"
+
+static const char *RELEASE_SONG_JSON =
+    "{\"type\":\"music_play\",\"title\":\"释怀\",\"url\":\""
+    "https://music.163.com/song?id=1345751384&uct2=U2FsdGVkX1+vHXtdBH5HmrUwnNHS+as3wzJtHMsaU78="
+    "\"}";
+
+static void release_click_cb(lv_event_t *event)
+{
+    lv_obj_t *title_label = (lv_obj_t *)lv_event_get_user_data(event);
+    if (!net_tcp_is_client_connected())
+    {
+        if (title_label) lv_label_set_text(title_label, UI_STR_MUSIC_RELEASE_OFFLINE);
+        return;
+    }
+
+    if (net_tcp_send_json(RELEASE_SONG_JSON) == ESP_OK)
+    {
+        if (title_label) lv_label_set_text(title_label, UI_STR_MUSIC_RELEASE_TITLE);
+        app_state_publish_media(true, true, UI_STR_MUSIC_RELEASE_TITLE, "关羽之歌");
+    }
+}
 
 lv_obj_t *ui_page_music_create(lv_obj_t *parent)
 {
@@ -35,12 +58,12 @@ lv_obj_t *ui_page_music_create(lv_obj_t *parent)
     ui_theme_apply_card(card);
 
     lv_obj_t *title_label = lv_label_create(card);
-    lv_label_set_text(title_label, UI_STR_MUSIC_PLACE);
+    lv_label_set_text(title_label, UI_STR_MUSIC_RELEASE_TITLE);
     lv_obj_set_pos(title_label, 24, 34);
     lv_obj_set_style_text_color(title_label, UI_COLOR_TEXT, 0);
 
     lv_obj_t *hint = lv_label_create(card);
-    lv_label_set_text(hint, UI_STR_MUSIC_HINT);
+    lv_label_set_text(hint, UI_STR_MUSIC_RELEASE_HINT);
     lv_obj_set_pos(hint, 24, 72);
     lv_obj_set_width(hint, 400);
     lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
@@ -51,7 +74,8 @@ lv_obj_t *ui_page_music_create(lv_obj_t *parent)
     lv_obj_align(button, LV_ALIGN_BOTTOM_RIGHT, -UI_GAP, -UI_GAP);
     ui_theme_apply_button(button, false);
     lv_obj_t *button_label = lv_label_create(button);
-    lv_label_set_text(button_label, UI_STR_MUSIC_CONNECT);
+    lv_label_set_text(button_label, UI_STR_MUSIC_RELEASE);
     lv_obj_center(button_label);
+    lv_obj_add_event_cb(button, release_click_cb, LV_EVENT_CLICKED, title_label);
     return page;
 }
