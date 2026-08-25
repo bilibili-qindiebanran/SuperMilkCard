@@ -204,6 +204,57 @@ esp_err_t i2s_audio_write(const int32_t *buf, size_t frames)
     return ESP_OK;
 }
 
+esp_err_t i2s_audio_set_tx_sample_rate(uint32_t sample_rate)
+{
+    if (s_tx == NULL || sample_rate < 8000 || sample_rate > 96000)
+        return ESP_ERR_INVALID_ARG;
+
+    esp_err_t err = i2s_channel_disable(s_tx);
+    if (err != ESP_OK) return err;
+
+    i2s_std_clk_config_t clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate);
+    clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_384;
+    err = i2s_channel_reconfig_std_clock(s_tx, &clk_cfg);
+    if (err != ESP_OK) return err;
+    return i2s_channel_enable(s_tx);
+}
+
+esp_err_t i2s_audio_write_pcm16(const int16_t *pcm, size_t samples, uint8_t channels)
+{
+    if (pcm == NULL || samples == 0 || (channels != 1 && channels != 2))
+        return ESP_ERR_INVALID_ARG;
+
+    static int32_t tx_buf[1024];
+    size_t offset = 0;
+    while (offset < samples)
+    {
+        size_t input_samples = samples - offset;
+        if (channels == 1)
+        {
+            size_t frames = input_samples > 512 ? 512 : input_samples;
+            for (size_t i = 0; i < frames; i++)
+            {
+                int32_t sample = (int32_t)pcm[offset + i] << 16;
+                tx_buf[i * 2] = sample;
+                tx_buf[i * 2 + 1] = sample;
+            }
+            esp_err_t err = i2s_audio_write(tx_buf, frames * 2);
+            if (err != ESP_OK) return err;
+            offset += frames;
+        }
+        else
+        {
+            size_t write_samples = input_samples > 1024 ? 1024 : input_samples;
+            for (size_t i = 0; i < write_samples; i++)
+                tx_buf[i] = (int32_t)pcm[offset + i] << 16;
+            esp_err_t err = i2s_audio_write(tx_buf, write_samples);
+            if (err != ESP_OK) return err;
+            offset += write_samples;
+        }
+    }
+    return ESP_OK;
+}
+
 void *i2s_audio_rx_handle(void)
 {
     return s_rx;

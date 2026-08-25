@@ -36,6 +36,7 @@
 #include "ip5306.h"
 #include "i2s_audio.h"
 #include "audio_voice.h"
+#include "music_player.h"
 #include "lcd_ui.h"
 #include "touch.h"
 #include "touch_test_ui.h"
@@ -275,6 +276,8 @@ void app_main(void)
         ESP_LOGI(TAG, "I2S audio ready (mic), loopback disabled.");
         /* 语音上行任务（录音 → Windows STT） */
         audio_voice_init();
+        err = music_player_init();
+        if (err != ESP_OK) ESP_LOGE(TAG, "music_player_init failed: %s", esp_err_to_name(err));
     }
 
     /* 4. UART0 JustFloat 初始化 */

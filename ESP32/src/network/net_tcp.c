@@ -29,6 +29,7 @@
 #include "lwip/sockets.h"
 
 #include "../ui/app_state.h"
+#include "../music_player.h"
 #include "net_config.h"
 #include "net_wifi.h"
 
@@ -169,6 +170,17 @@ static void handle_text_payload(const char *json, size_t len)
     }
     /* 其他类型（audio_start/end、text 等）首期忽略 */
 
+    if (strcmp(type, "audio_start") == 0)
+    {
+        char format[16] = "";
+        json_get_string(buf, "format", format, sizeof(format));
+        if (strcmp(format, "mp3") == 0) music_player_start();
+    }
+    else if (strcmp(type, "audio_end") == 0)
+    {
+        music_player_finish();
+    }
+
     free(buf);
 }
 
@@ -299,6 +311,8 @@ static void client_session(int fd)
                     {
                         /* 首期无音频解码；忽略 */
                     }
+                    if (type == FRAME_TYPE_AUDIO)
+                        music_player_write(payload, payload_len);
                     free(payload);
                     payload = NULL;
                     want = FRAME_HEADER_LEN;

@@ -94,6 +94,10 @@ void i2s_audio_set_rx_exclusive(bool exclusive);
  */
 esp_err_t i2s_audio_write(const int32_t *buf, size_t frames);
 
+esp_err_t i2s_audio_set_tx_sample_rate(uint32_t sample_rate);
+
+esp_err_t i2s_audio_write_pcm16(const int16_t *pcm, size_t samples, uint8_t channels);
+
 /**
  * @brief 获取 RX 通道句柄（内部回环/诊断用）
  */
