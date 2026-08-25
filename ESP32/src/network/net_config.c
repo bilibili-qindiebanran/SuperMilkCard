@@ -21,6 +21,35 @@
 #define KEY_STT_URL "stt_url"
 #define KEY_STT_KEY "stt_key"
 #define KEY_STT_MODEL "stt_model"
+#define KEY_LLM_URL "llm_url"
+#define KEY_LLM_KEY "llm_key"
+#define KEY_LLM_MODEL "llm_model"
+#define KEY_LLM_TEMP "llm_temp"   /* u16：温度×1000 */
+#define KEY_LLM_MAX "llm_max"
+#define KEY_LLM_CTX "llm_ctx"
+#define KEY_ROLE_PROMPT "role_prompt"
+
+/* 按 UTF-8 字节截断，不切断多字节字符（末尾补 '\0'） */
+static void truncate_utf8(char *dst, size_t cap, const char *src)
+{
+    if (!dst || cap == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    size_t len = strlen(src);
+    if (len > cap - 1) len = cap - 1;
+    while (len > 0 && ((unsigned char)src[len] & 0xC0) == 0x80) len--;
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
+/* 角色提示词预设默认值 */
+static void llm_defaults(net_llm_config_t *llm)
+{
+    memset(llm, 0, sizeof(*llm));
+    llm->temperature = NET_CFG_LLM_DEFAULT_TEMP;
+    llm->max_tokens = NET_CFG_LLM_DEFAULT_MAX_TOKENS;
+    llm->context_tokens = NET_CFG_LLM_DEFAULT_CONTEXT_TOKENS;
+    truncate_utf8(llm->role_prompt, sizeof(llm->role_prompt), NET_CFG_ROLE_PROMPT_DEFAULT);
+}
 
 static bool s_nvs_ready;
 
@@ -55,6 +84,7 @@ esp_err_t net_config_load(net_config_t *cfg)
     snprintf(cfg->name, sizeof(cfg->name), "%s", NET_CFG_DEFAULT_NAME);
     snprintf(cfg->stt_url, sizeof(cfg->stt_url), "%s", "wss://dashscope.aliyuncs.com/api-ws/v1/inference");
     snprintf(cfg->stt_model, sizeof(cfg->stt_model), "%s", "qwen-audio-3.0-asr-flash-streaming");
+    llm_defaults(&cfg->llm);
 
     if (!s_nvs_ready) return ESP_OK;
 
@@ -75,6 +105,22 @@ esp_err_t net_config_load(net_config_t *cfg)
     get_str(h, KEY_STT_MODEL, cfg->stt_model, sizeof(cfg->stt_model));
     if (!cfg->stt_url[0]) snprintf(cfg->stt_url, sizeof(cfg->stt_url), "%s", "wss://dashscope.aliyuncs.com/api-ws/v1/inference");
     if (!cfg->stt_model[0]) snprintf(cfg->stt_model, sizeof(cfg->stt_model), "%s", "qwen-audio-3.0-asr-flash-streaming");
+
+    /* 独立角色 LLM 配置 */
+    get_str(h, KEY_LLM_URL, cfg->llm.base_url, sizeof(cfg->llm.base_url));
+    get_str(h, KEY_LLM_KEY, cfg->llm.api_key, sizeof(cfg->llm.api_key));
+    get_str(h, KEY_LLM_MODEL, cfg->llm.model, sizeof(cfg->llm.model));
+    uint16_t temp_x1000 = 0;
+    if (nvs_get_u16(h, KEY_LLM_TEMP, &temp_x1000) == ESP_OK)
+        cfg->llm.temperature = (float)temp_x1000 / 1000.0f;
+    uint16_t v = 0;
+    if (nvs_get_u16(h, KEY_LLM_MAX, &v) == ESP_OK) cfg->llm.max_tokens = v;
+    v = 0;
+    if (nvs_get_u16(h, KEY_LLM_CTX, &v) == ESP_OK) cfg->llm.context_tokens = v;
+    get_str(h, KEY_ROLE_PROMPT, cfg->llm.role_prompt, sizeof(cfg->llm.role_prompt));
+    if (!cfg->llm.role_prompt[0])
+        truncate_utf8(cfg->llm.role_prompt, sizeof(cfg->llm.role_prompt), NET_CFG_ROLE_PROMPT_DEFAULT);
+
     cfg->has_ssid = cfg->ssid[0] != '\0';
 
     nvs_close(h);
@@ -109,6 +155,80 @@ esp_err_t net_config_save_stt(const char *url, const char *api_key, const char *
     if (api_key) nvs_set_str(h, KEY_STT_KEY, api_key);
     if (model) nvs_set_str(h, KEY_STT_MODEL, model);
     err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+bool net_config_has_llm(const net_config_t *cfg)
+{
+    if (!cfg) return false;
+    return cfg->llm.base_url[0] != '\0' &&
+           cfg->llm.api_key[0] != '\0' &&
+           cfg->llm.model[0] != '\0';
+}
+
+esp_err_t net_config_save_llm(const net_llm_config_t *llm)
+{
+    if (!s_nvs_ready || !llm) return ESP_ERR_INVALID_STATE;
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NET_CFG_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+
+    nvs_set_str(h, KEY_LLM_URL, llm->base_url);
+    nvs_set_str(h, KEY_LLM_MODEL, llm->model);
+    uint16_t temp_x1000 = (uint16_t)(llm->temperature * 1000.0f + 0.5f);
+    nvs_set_u16(h, KEY_LLM_TEMP, temp_x1000);
+    nvs_set_u16(h, KEY_LLM_MAX, llm->max_tokens);
+    nvs_set_u16(h, KEY_LLM_CTX, llm->context_tokens);
+    if (llm->role_prompt[0])
+        nvs_set_str(h, KEY_ROLE_PROMPT, llm->role_prompt);
+    /* 注意：不写 KEY_LLM_KEY——Key 只经 net_config_set_llm_key() 单独保存 */
+
+    err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t net_config_save_role_prompt(const char *prompt)
+{
+    if (!s_nvs_ready) return ESP_ERR_INVALID_STATE;
+
+    char buf[NET_CFG_ROLE_PROMPT_MAX];
+    truncate_utf8(buf, sizeof(buf), prompt);
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NET_CFG_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_str(h, KEY_ROLE_PROMPT, buf);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t net_config_set_llm_key(const char *api_key)
+{
+    if (!s_nvs_ready || !api_key) return ESP_ERR_INVALID_STATE;
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NET_CFG_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_str(h, KEY_LLM_KEY, api_key);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t net_config_clear_llm_key(void)
+{
+    if (!s_nvs_ready) return ESP_ERR_INVALID_STATE;
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NET_CFG_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_erase_key(h, KEY_LLM_KEY);
+    if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+    if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return err;
 }
