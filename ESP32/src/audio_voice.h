@@ -22,6 +22,10 @@ extern "C" {
  * @return ESP_OK 已开始；ESP_ERR_NOT_FOUND 未连接；ESP_ERR_INVALID_STATE 已在录
  */
 esp_err_t audio_voice_start(void);
+typedef void (*audio_voice_text_cb_t)(const char *text, void *user_ctx);
+
+/** @brief 设置 STT 文本接收回调；传入 NULL 时恢复发送到 Windows TCP。 */
+void audio_voice_set_text_sink(audio_voice_text_cb_t cb, void *user_ctx);
 
 /**
  * @brief 停止录音并触发 ESP32 本地 STT（若正在进行）。

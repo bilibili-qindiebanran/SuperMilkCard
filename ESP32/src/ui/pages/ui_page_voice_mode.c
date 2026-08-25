@@ -12,6 +12,8 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 
+#include "../../llm_role.h"
+#include "../../network/net_config.h"
 #include "../../network/net_tcp.h"
 #include "../../network/net_wifi.h"
 #include "../app_state.h"
@@ -34,14 +36,9 @@ static lv_obj_t *s_status_label;   /* 预检结果/错误 */
 static lv_obj_t *s_status_detail;
 static lv_obj_t *s_retry_btn;
 static lv_obj_t *s_switch_btn;
+static lv_obj_t *s_settings_btn;
 static uint32_t s_check_start_ms;   /* 预检起始 tick */
 static bool s_checking;
-
-/* 预检是否在进行中（供 refresh 轮询） */
-static bool vm_checking(void)
-{
-    return s_checking;
-}
 
 /* 应用卡片焦点样式 */
 static void apply_focus(void)
@@ -144,6 +141,13 @@ static void switch_direct_cb(lv_event_t *event)
     ui_page_voice_mode_handle_key(1);
 }
 
+/* 打开设置（独立模式配置缺失时的引导入口） */
+static void open_settings_cb(lv_event_t *event)
+{
+    (void)event;
+    ui_pages_show_settings();
+}
+
 /* 返回桌面 */
 void ui_page_voice_mode_back_cb(lv_event_t *event)
 {
@@ -161,6 +165,7 @@ static void vm_start_check(void)
     int focus = ui_page_voice_mode_focus();
     lv_obj_clear_flag(s_retry_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_switch_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_settings_btn, LV_OBJ_FLAG_HIDDEN);
 
     if (focus == 0)
     {
@@ -191,6 +196,7 @@ static void vm_check_done(bool ok, const char *ok_text, const char *fail_text)
         lv_obj_set_style_text_color(s_status_label, UI_COLOR_SUCCESS, 0);
         lv_obj_add_flag(s_retry_btn, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_switch_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_settings_btn, LV_OBJ_FLAG_HIDDEN);
     }
     else
     {
@@ -199,11 +205,12 @@ static void vm_check_done(bool ok, const char *ok_text, const char *fail_text)
         lv_obj_set_style_text_color(s_status_label, UI_COLOR_WARN, 0);
         lv_obj_clear_flag(s_retry_btn, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_switch_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_settings_btn, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_status_detail, app_state_get()->session.error);
     }
 }
 
-/* 周期刷新：预检轮询（Live2D 连接检查 ≤5s） */
+/* 周期刷新：预检轮询（Live2D 连接检查 ≤5s；独立模式一次完成） */
 void ui_page_voice_mode_refresh(void)
 {
     if (!s_page) return;
@@ -232,18 +239,42 @@ void ui_page_voice_mode_refresh(void)
     }
     else
     {
-        /* 独立角色：首期仅检查 Wi-Fi 是否在线（API 配置检查留待独立模式实现） */
-        if (net_wifi_is_connected())
+        /* 独立角色：检查 Wi-Fi 与 LLM 配置是否齐全 */
+        if (!net_wifi_is_connected())
         {
-            vm_check_done(true, UI_STR_VOICE_DIRECT_OK, NULL);
-            app_state_publish_session(APP_MODE_DIRECT_API, APP_SESSION_DIRECT_IDLE, NULL);
-        }
-        else if (now - s_check_start_ms >= VM_CHECK_TIMEOUT_MS)
-        {
-            vm_check_done(false, NULL, UI_STR_VOICE_DIRECT_FAIL);
+            vm_check_done(false, NULL, UI_STR_VOICE_DIRECT_NO_WIFI);
             app_state_publish_session(APP_MODE_DIRECT_API, APP_SESSION_ERROR,
-                                      UI_STR_VOICE_DIRECT_FAIL);
+                                      UI_STR_VOICE_DIRECT_NO_WIFI);
+            return;
         }
+        net_config_t cfg;
+        net_config_load(&cfg);
+        if (!cfg.llm.base_url[0])
+        {
+            vm_check_done(false, NULL, UI_STR_VOICE_DIRECT_NO_URL);
+            app_state_publish_session(APP_MODE_DIRECT_API, APP_SESSION_ERROR,
+                                      UI_STR_VOICE_DIRECT_NO_URL);
+            return;
+        }
+        if (!cfg.llm.api_key[0])
+        {
+            vm_check_done(false, NULL, UI_STR_VOICE_DIRECT_NO_KEY);
+            app_state_publish_session(APP_MODE_DIRECT_API, APP_SESSION_ERROR,
+                                      UI_STR_VOICE_DIRECT_NO_KEY);
+            return;
+        }
+        if (!cfg.llm.model[0])
+        {
+            vm_check_done(false, NULL, UI_STR_VOICE_DIRECT_NO_MODEL);
+            app_state_publish_session(APP_MODE_DIRECT_API, APP_SESSION_ERROR,
+                                      UI_STR_VOICE_DIRECT_NO_MODEL);
+            return;
+        }
+
+        /* 配置齐全：进入独立角色对话页 */
+        vm_check_done(true, UI_STR_VOICE_DIRECT_OK, NULL);
+        app_state_publish_session(APP_MODE_DIRECT_API, APP_SESSION_DIRECT_IDLE, NULL);
+        ui_pages_show_direct_chat();
     }
 }
 
@@ -284,6 +315,7 @@ void ui_page_voice_mode_show(void)
     lv_label_set_text(s_status_detail, "");
     lv_obj_add_flag(s_retry_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_switch_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_settings_btn, LV_OBJ_FLAG_HIDDEN);
     apply_focus();
 }
 
@@ -367,6 +399,18 @@ lv_obj_t *ui_page_voice_mode_create(lv_obj_t *parent)
     lv_obj_center(switch_label);
     lv_obj_add_event_cb(s_switch_btn, switch_direct_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_flag(s_switch_btn, LV_OBJ_FLAG_HIDDEN);
+
+    /* 打开设置按钮（独立模式配置缺失时显示） */
+    lv_obj_t *settings_btn = lv_button_create(page);
+    lv_obj_set_size(settings_btn, 150, 30);
+    lv_obj_set_pos(settings_btn, UI_MARGIN + 260, VM_CARD2_Y + VM_CARD_H + 6);
+    ui_theme_apply_button(settings_btn, false);
+    lv_obj_t *settings_label = lv_label_create(settings_btn);
+    lv_label_set_text(settings_label, UI_STR_VOICE_OPEN_SETTINGS);
+    lv_obj_center(settings_label);
+    lv_obj_add_event_cb(settings_btn, open_settings_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_flag(settings_btn, LV_OBJ_FLAG_HIDDEN);
+    s_settings_btn = settings_btn;
 
     /* 操作提示（底部） */
     lv_obj_t *hint = lv_label_create(page);

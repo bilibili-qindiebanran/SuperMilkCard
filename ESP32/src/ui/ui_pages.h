@@ -54,6 +54,16 @@ void ui_pages_show_live2d(void);
 void ui_pages_show_voice_mode(void);
 
 /**
+ * @brief 进入全屏独立角色对话页（由语音互动模式选择页的独立模式预检成功后调用）
+ */
+void ui_pages_show_direct_chat(void);
+
+/**
+ * @brief 从全屏页打开常规设置页（独立模式预检失败的「打开设置」入口）
+ */
+void ui_pages_show_settings(void);
+
+/**
  * @brief 返回桌面：回到主页并恢复常规底部导航，通知 Windows
  */
 void ui_pages_return_home(void);
@@ -67,6 +77,11 @@ bool ui_pages_live2d_active(void);
  * @brief 当前是否处于全屏语音互动模式选择页
  */
 bool ui_pages_voice_mode_active(void);
+
+/**
+ * @brief 当前是否处于全屏独立角色对话页
+ */
+bool ui_pages_direct_chat_active(void);
 
 /**
  * @brief 实体按键分发（ui_port_input 调用）：按当前页面路由

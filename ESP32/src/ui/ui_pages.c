@@ -6,6 +6,7 @@
 #include "ui_pages.h"
 
 #include "pages/ui_page_chat.h"
+#include "pages/ui_page_direct_chat.h"
 #include "pages/ui_page_home.h"
 #include "pages/ui_page_live2d.h"
 #include "pages/ui_page_music.h"
@@ -20,6 +21,7 @@ static lv_obj_t *s_content_area;
 static lv_obj_t *s_nav;
 static lv_obj_t *s_live2d_page;
 static lv_obj_t *s_voice_mode_page;
+static lv_obj_t *s_direct_chat_page;
 static ui_page_id_t s_current = UI_PAGE_HOME;
 
 static lv_obj_t *(*const s_page_creators[UI_PAGE_COUNT])(lv_obj_t *) = {
@@ -30,10 +32,7 @@ static lv_obj_t *(*const s_page_creators[UI_PAGE_COUNT])(lv_obj_t *) = {
 };
 
 static const char *const s_nav_labels[UI_PAGE_COUNT] = {
-    UI_STR_HOME,
-    UI_STR_CHAT,
-    UI_STR_MUSIC,
-    UI_STR_SETTINGS,
+    UI_STR_HOME, UI_STR_CHAT, UI_STR_MUSIC, UI_STR_SETTINGS,
 };
 
 static void nav_click_cb(lv_event_t *event)
@@ -77,8 +76,7 @@ void ui_pages_create(lv_obj_t *parent)
     for (int i = 0; i < UI_PAGE_COUNT; i++)
     {
         s_pages[i] = s_page_creators[i](content_area);
-        if (i != UI_PAGE_HOME)
-            lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
+        if (i != UI_PAGE_HOME) lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
     }
 
     lv_obj_t *nav = lv_obj_create(parent);
@@ -116,18 +114,19 @@ void ui_pages_create(lv_obj_t *parent)
     /* 全屏语音互动模式选择页（默认隐藏） */
     s_voice_mode_page = ui_page_voice_mode_create(parent);
     lv_obj_add_flag(s_voice_mode_page, LV_OBJ_FLAG_HIDDEN);
+
+    /* 全屏独立角色对话页（默认隐藏） */
+    s_direct_chat_page = ui_page_direct_chat_create(parent);
+    lv_obj_add_flag(s_direct_chat_page, LV_OBJ_FLAG_HIDDEN);
 }
 
 void ui_pages_show(ui_page_id_t id)
 {
-    if (id >= UI_PAGE_COUNT)
-        return;
+    if (id >= UI_PAGE_COUNT) return;
     for (int i = 0; i < UI_PAGE_COUNT; i++)
     {
-        if (i == (int)id)
-            lv_obj_clear_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
-        else
-            lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
+        if (i == (int)id) lv_obj_clear_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
     }
     s_current = id;
     update_nav_style();
@@ -140,47 +139,58 @@ ui_page_id_t ui_pages_current(void)
 
 void ui_pages_show_live2d(void)
 {
-    if (s_live2d_page == NULL)
-        return;
+    if (s_live2d_page == NULL) return;
     /* 隐藏常规内容区、底部导航与其它全屏页 */
-    if (s_content_area)
-        lv_obj_add_flag(s_content_area, LV_OBJ_FLAG_HIDDEN);
-    if (s_nav)
-        lv_obj_add_flag(s_nav, LV_OBJ_FLAG_HIDDEN);
-    for (int i = 0; i < UI_PAGE_COUNT; i++)
-        lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
-    if (s_voice_mode_page)
-        lv_obj_add_flag(s_voice_mode_page, LV_OBJ_FLAG_HIDDEN);
+    if (s_content_area) lv_obj_add_flag(s_content_area, LV_OBJ_FLAG_HIDDEN);
+    if (s_nav) lv_obj_add_flag(s_nav, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < UI_PAGE_COUNT; i++) lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
+    if (s_voice_mode_page) lv_obj_add_flag(s_voice_mode_page, LV_OBJ_FLAG_HIDDEN);
+    if (s_direct_chat_page) lv_obj_add_flag(s_direct_chat_page, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
     ui_page_live2d_show();
 }
 
 void ui_pages_show_voice_mode(void)
 {
-    if (s_voice_mode_page == NULL)
-        return;
-    if (s_content_area)
-        lv_obj_add_flag(s_content_area, LV_OBJ_FLAG_HIDDEN);
-    if (s_nav)
-        lv_obj_add_flag(s_nav, LV_OBJ_FLAG_HIDDEN);
-    for (int i = 0; i < UI_PAGE_COUNT; i++)
-        lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
-    if (s_live2d_page)
-        lv_obj_add_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
+    if (s_voice_mode_page == NULL) return;
+    if (s_content_area) lv_obj_add_flag(s_content_area, LV_OBJ_FLAG_HIDDEN);
+    if (s_nav) lv_obj_add_flag(s_nav, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < UI_PAGE_COUNT; i++) lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
+    if (s_live2d_page) lv_obj_add_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
+    if (s_direct_chat_page) lv_obj_add_flag(s_direct_chat_page, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_voice_mode_page, LV_OBJ_FLAG_HIDDEN);
     ui_page_voice_mode_show();
 }
 
+void ui_pages_show_direct_chat(void)
+{
+    if (s_direct_chat_page == NULL) return;
+    if (s_content_area) lv_obj_add_flag(s_content_area, LV_OBJ_FLAG_HIDDEN);
+    if (s_nav) lv_obj_add_flag(s_nav, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < UI_PAGE_COUNT; i++) lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
+    if (s_live2d_page) lv_obj_add_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
+    if (s_voice_mode_page) lv_obj_add_flag(s_voice_mode_page, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_direct_chat_page, LV_OBJ_FLAG_HIDDEN);
+    ui_page_direct_chat_show();
+}
+
+void ui_pages_show_settings(void)
+{
+    ui_pages_return_home(); /* 先回到常规导航 */
+    ui_pages_show(UI_PAGE_SETTINGS);
+}
+
 void ui_pages_return_home(void)
 {
-    if (s_live2d_page)
-        lv_obj_add_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
-    if (s_voice_mode_page)
-        lv_obj_add_flag(s_voice_mode_page, LV_OBJ_FLAG_HIDDEN);
-    if (s_content_area)
-        lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_HIDDEN);
-    if (s_nav)
-        lv_obj_clear_flag(s_nav, LV_OBJ_FLAG_HIDDEN);
+    if (s_live2d_page) lv_obj_add_flag(s_live2d_page, LV_OBJ_FLAG_HIDDEN);
+    if (s_voice_mode_page) lv_obj_add_flag(s_voice_mode_page, LV_OBJ_FLAG_HIDDEN);
+    if (s_direct_chat_page)
+    {
+        lv_obj_add_flag(s_direct_chat_page, LV_OBJ_FLAG_HIDDEN);
+        ui_page_direct_chat_hide();
+    }
+    if (s_content_area) lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_HIDDEN);
+    if (s_nav) lv_obj_clear_flag(s_nav, LV_OBJ_FLAG_HIDDEN);
     ui_pages_show(UI_PAGE_HOME);
 }
 
@@ -194,27 +204,32 @@ bool ui_pages_voice_mode_active(void)
     return s_voice_mode_page && !lv_obj_has_flag(s_voice_mode_page, LV_OBJ_FLAG_HIDDEN);
 }
 
+bool ui_pages_direct_chat_active(void)
+{
+    return s_direct_chat_page && !lv_obj_has_flag(s_direct_chat_page, LV_OBJ_FLAG_HIDDEN);
+}
+
 /* 实体按键分发：按当前页面路由 */
 void ui_pages_handle_key(board_key_event_t key)
 {
+    if (ui_pages_direct_chat_active())
+    {
+        if (key == BOARD_KEY_BACK_LONG || key == BOARD_KEY_BACK)
+        {
+            ui_pages_return_home(); /* 独立对话页返回桌面 */
+        }
+        return;
+    }
+
     if (ui_pages_voice_mode_active())
     {
         switch (key)
         {
-        case BOARD_KEY_BACK:
-            ui_page_voice_mode_handle_key(0);
-            break;
-        case BOARD_KEY_OK:
-            ui_page_voice_mode_handle_key(1);
-            break;
-        case BOARD_KEY_BACK_LONG:
-            ui_page_voice_mode_handle_key(2);
-            break;
-        case BOARD_KEY_OK_LONG:
-            ui_page_voice_mode_handle_key(3);
-            break;
-        default:
-            break;
+        case BOARD_KEY_BACK:      ui_page_voice_mode_handle_key(0); break;
+        case BOARD_KEY_OK:        ui_page_voice_mode_handle_key(1); break;
+        case BOARD_KEY_BACK_LONG: ui_page_voice_mode_handle_key(2); break;
+        case BOARD_KEY_OK_LONG:   ui_page_voice_mode_handle_key(3); break;
+        default: break;
         }
         return;
     }
@@ -239,7 +254,9 @@ void ui_pages_invalidate_active(void)
 {
     lv_obj_t *page = ui_pages_voice_mode_active()
                          ? s_voice_mode_page
-                         : (ui_pages_live2d_active() ? s_live2d_page : s_pages[s_current]);
-    if (page)
-        lv_obj_invalidate(page);
+                         : (ui_pages_live2d_active()
+                                ? s_live2d_page
+                                : (ui_pages_direct_chat_active() ? s_direct_chat_page
+                                                                 : s_pages[s_current]));
+    if (page) lv_obj_invalidate(page);
 }
