@@ -234,7 +234,7 @@ esp_err_t i2s_audio_write_pcm16(const int16_t *pcm, size_t samples, uint8_t chan
             size_t frames = input_samples > 512 ? 512 : input_samples;
             for (size_t i = 0; i < frames; i++)
             {
-                int32_t sample = (int32_t)pcm[offset + i] << 16;
+                int32_t sample = (int32_t)pcm[offset + i] / 4;
                 tx_buf[i * 2] = sample;
                 tx_buf[i * 2 + 1] = sample;
             }
@@ -246,7 +246,7 @@ esp_err_t i2s_audio_write_pcm16(const int16_t *pcm, size_t samples, uint8_t chan
         {
             size_t write_samples = input_samples > 1024 ? 1024 : input_samples;
             for (size_t i = 0; i < write_samples; i++)
-                tx_buf[i] = (int32_t)pcm[offset + i] << 16;
+                tx_buf[i] = (int32_t)pcm[offset + i] / 4;
             esp_err_t err = i2s_audio_write(tx_buf, write_samples);
             if (err != ESP_OK) return err;
             offset += write_samples;

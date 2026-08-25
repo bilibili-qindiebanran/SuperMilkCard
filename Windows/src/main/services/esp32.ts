@@ -368,10 +368,28 @@ async function playMusicOnEsp32(songUrl: string): Promise<Esp32SendResult> {
       return { ok: false, message: `网易云音频获取失败（HTTP ${response.status}）` }
     }
 
-    await writeSocketBuffer(encodeTextFrame({ type: 'audio_start', format: 'mp3' }))
+    let started = false
+    let pending = Buffer.alloc(0)
     for await (const chunk of response.body) {
-      await writeSocketBuffer(encodeFrame(FrameType.AUDIO, Buffer.from(chunk)))
+      const audioChunk = Buffer.from(chunk)
+      if (!started) {
+        pending = Buffer.concat([pending, audioChunk])
+        if (pending.length < 4) continue
+        const prefix = pending.subarray(0, 4)
+        const hasId3 = prefix.length >= 3 && prefix.subarray(0, 3).toString('ascii') === 'ID3'
+        const hasMpegSync = prefix.length >= 2 && prefix[0] === 0xff && (prefix[1] & 0xe0) === 0xe0
+        if (!hasId3 && !hasMpegSync) {
+          return { ok: false, message: '网易云返回的内容不是 MP3 音频' }
+        }
+        await writeSocketBuffer(encodeTextFrame({ type: 'audio_start', format: 'mp3' }))
+        started = true
+        await writeSocketBuffer(encodeFrame(FrameType.AUDIO, pending))
+        pending = Buffer.alloc(0)
+        continue
+      }
+      await writeSocketBuffer(encodeFrame(FrameType.AUDIO, audioChunk))
     }
+    if (!started) return { ok: false, message: '网易云音频流为空' }
     await writeSocketBuffer(encodeTextFrame({ type: 'audio_end' }))
     return { ok: true }
   } catch (err) {
