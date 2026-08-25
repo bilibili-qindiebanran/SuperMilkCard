@@ -81,7 +81,7 @@ static bool json_get_number(const char *json, const char *key, double *out)
     if (!p) return false;
     const char *colon = strchr(p + strlen(needle), ':');
     if (!colon) return false;
-    const char *q = colon;
+    const char *q = colon + 1;
     while (q[0] && (q[0] == ' ' || q[0] == '\t')) q++;
     if (q[0] < '0' || q[0] > '9') return false;
     *out = strtod(q, NULL);
