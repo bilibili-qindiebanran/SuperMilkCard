@@ -329,6 +329,56 @@ function sendChat(role: 'user' | 'assistant', content: string): Esp32SendResult 
   return { ok: true }
 }
 
+function writeSocketBuffer(data: Buffer): Promise<void> {
+  if (!socket || status.state !== 'connected') return Promise.reject(new Error('ESP32 未连接'))
+  if (socket.write(data)) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const onDrain = (): void => {
+      socket?.off('error', onError)
+      resolve()
+    }
+    const onError = (err: Error): void => {
+      socket?.off('drain', onDrain)
+      reject(err)
+    }
+    socket.once('drain', onDrain)
+    socket.once('error', onError)
+  })
+}
+
+async function playMusicOnEsp32(songUrl: string): Promise<Esp32SendResult> {
+  if (!socket || status.state !== 'connected') return { ok: false, message: 'ESP32 未连接' }
+
+  try {
+    const song = new URL(songUrl)
+    const songId = song.searchParams.get('id')
+    if (song.hostname !== 'music.163.com' || song.pathname !== '/song' || !songId) {
+      return { ok: false, message: '不支持的网易云歌曲地址' }
+    }
+
+    const mediaUrl = `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(songId)}.mp3`
+    const response = await fetch(mediaUrl, {
+      headers: {
+        Accept: 'audio/mpeg',
+        Referer: 'https://music.163.com/'
+      },
+      redirect: 'follow'
+    })
+    if (!response.ok || !response.body) {
+      return { ok: false, message: `网易云音频获取失败（HTTP ${response.status}）` }
+    }
+
+    await writeSocketBuffer(encodeTextFrame({ type: 'audio_start', format: 'mp3' }))
+    for await (const chunk of response.body) {
+      await writeSocketBuffer(encodeFrame(FrameType.AUDIO, Buffer.from(chunk)))
+    }
+    await writeSocketBuffer(encodeTextFrame({ type: 'audio_end' }))
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 async function sendTts(text: string): Promise<Esp32SendResult> {
   if (!socket || status.state !== 'connected') return { ok: false, message: 'ESP32 未连接' }
   try {
@@ -386,5 +436,6 @@ export {
   resolveTarget,
   sendChat,
   sendTts,
+  playMusicOnEsp32,
   sendLive2dState
 }

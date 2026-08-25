@@ -7,6 +7,7 @@ import type {
   ChatStreamRequest,
   EmotionClassifyItem,
   Esp32Live2dState,
+  MusicPlaybackTarget,
   SettingsPatch,
   SttTranscribeRequest,
   TtsSynthesizeRequest
@@ -25,6 +26,7 @@ import {
   disconnect,
   getStatus as getEsp32Status,
   listDevices,
+  playMusicOnEsp32,
   sendChat,
   sendLive2dState,
   sendTts
@@ -52,6 +54,10 @@ function isAllowedMusicUrl(value: string): boolean {
   } catch {
     return false
   }
+}
+
+function getMusicPlaybackTarget(): MusicPlaybackTarget {
+  return getSettings().music?.playbackTarget === 'esp32' ? 'esp32' : 'pc'
 }
 
 /** 丢弃渲染层补丁中的 apiKey / hasApiKey，避免把状态性/敏感字段写入主进程配置 */
@@ -223,7 +229,13 @@ export function registerIpc(): void {
       console.warn('[esp32] ignored unsupported music URL:', command.url)
       return
     }
-    void shell.openExternal(RELEASE_SONG_URL)
+    if (getMusicPlaybackTarget() === 'pc') {
+      void shell.openExternal(RELEASE_SONG_URL)
+      return
+    }
+    void playMusicOnEsp32(command.url).then((result) => {
+      if (!result.ok && result.message) broadcast('esp32:error', { message: result.message })
+    })
   })
   esp32Emitter.on('error', (m) => broadcast('esp32:error', m))
   perfEmitter.on('sample', (s) => broadcast('perf:sample', s))

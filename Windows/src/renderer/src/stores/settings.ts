@@ -5,6 +5,7 @@ import type {
   ApiKeyTestResult,
   Esp32Config,
   Live2dConfig,
+  MusicConfig,
   PerfConfig,
   Persona,
   PublicAppSettings,
@@ -60,6 +61,7 @@ export const useSettingsStore = defineStore('settings', {
     stt: (s): PublicSttConfig => s.data.stt,
     live2d: (s): Live2dConfig => s.data.live2d,
     esp32: (s): Esp32Config => s.data.esp32,
+    music: (s): MusicConfig => s.data.music,
     perf: (s): PerfConfig => s.data.perf,
     theme: (s): ThemeMode => s.data.theme
   },

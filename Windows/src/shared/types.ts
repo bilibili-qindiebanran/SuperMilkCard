@@ -103,6 +103,12 @@ export interface Esp32Config {
   reconnectIntervalMs: number
 }
 
+export type MusicPlaybackTarget = 'pc' | 'esp32'
+
+export interface MusicConfig {
+  playbackTarget: MusicPlaybackTarget
+}
+
 /** 局域网内发现的 ESP32 设备 */
 export interface Esp32Device {
   id: string
@@ -218,6 +224,7 @@ export interface AppSettings {
   stt: SttConfig
   live2d: Live2dConfig
   esp32: Esp32Config
+  music: MusicConfig
   perf: PerfConfig
   theme: ThemeMode
 }
@@ -268,6 +275,7 @@ export interface PublicAppSettings {
   stt: PublicSttConfig
   live2d: Live2dConfig
   esp32: Esp32Config
+  music: MusicConfig
   perf: PerfConfig
   theme: ThemeMode
 }
@@ -281,6 +289,7 @@ export interface SettingsPatch {
   activePersonaId?: string
   live2d?: Live2dConfig
   esp32?: Partial<Esp32Config>
+  music?: Partial<MusicConfig>
   perf?: Partial<PerfConfig>
   theme?: ThemeMode
 }
@@ -319,6 +328,7 @@ export function toPublicSettings(s: AppSettings): PublicAppSettings {
     },
     live2d: s.live2d,
     esp32: s.esp32,
+    music: s.music,
     perf: s.perf,
     theme: s.theme
   }
@@ -530,6 +540,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     tcpPort: 9000,
     wsPort: 9001,
     reconnectIntervalMs: 1000
+  },
+  music: {
+    playbackTarget: 'pc'
   },
   perf: {
     enabled: false,
