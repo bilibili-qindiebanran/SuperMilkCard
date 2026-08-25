@@ -114,8 +114,16 @@ esp_err_t net_config_save_stt(const char *url, const char *api_key, const char *
 }
 bool net_config_load_and_has_ssid(void)
 {
-    net_config_t cfg;
-    return net_config_load(&cfg) == ESP_OK && cfg.has_ssid;
+    if (!s_nvs_ready) return false;
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NET_CFG_NS, NVS_READONLY, &handle);
+    if (err != ESP_OK) return false;
+
+    size_t ssid_len = 0;
+    err = nvs_get_str(handle, KEY_SSID, NULL, &ssid_len);
+    nvs_close(handle);
+    return err == ESP_OK && ssid_len > 1;
 }
 
 esp_err_t net_config_forget(void)

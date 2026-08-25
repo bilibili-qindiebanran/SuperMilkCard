@@ -272,7 +272,7 @@ esp_err_t net_wifi_start(void)
 
     s_started = true;
 
-    if (xTaskCreate(wifi_worker_task, "wifi_worker", 4096, NULL, 3, NULL) != pdPASS)
+    if (xTaskCreate(wifi_worker_task, "wifi_worker", 8192, NULL, 3, NULL) != pdPASS)
         return ESP_ERR_NO_MEM;
 
     net_config_t nc;

@@ -76,7 +76,7 @@ esp_err_t i2s_audio_read(int32_t *buf, size_t frames);
  * @brief 语音录音专用读取（独占期间唯一允许读的路径）
  * 等待更久以攒够数据，供 audio_voice 录音任务使用。
  */
-esp_err_t i2s_audio_read_voice(int32_t *buf, size_t frames);
+esp_err_t i2s_audio_read_voice(int32_t *buf, size_t frames, size_t *frames_read);
 
 /**
  * @brief 独占麦克风读取（语音录音用）。

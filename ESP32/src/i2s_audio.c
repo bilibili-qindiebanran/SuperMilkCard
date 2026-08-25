@@ -142,25 +142,25 @@ void i2s_audio_set_rx_exclusive(bool exclusive)
     s_rx_exclusive = exclusive;
 }
 
-/* 语音专用读取：不检查独占标志（录音期间唯一允许读的路径）。
- * 关键：i2s_channel_read 在超时内能读多少读多少（bytes_read 返回实际），
- * 不要求读满 frames —— DMA 数据是按帧累积的，读不满不应视为失败。 */
-esp_err_t i2s_audio_read_voice(int32_t *buf, size_t frames)
+/* 语音专用读取：返回本次 DMA 实际读取的完整帧数。 */
+esp_err_t i2s_audio_read_voice(int32_t *buf, size_t frames, size_t *frames_read)
 {
-    if (s_rx == NULL || buf == NULL) {
+    if (s_rx == NULL || buf == NULL || frames == 0 || frames_read == NULL)
         return ESP_ERR_INVALID_STATE;
-    }
-    if (s_rx_lock && xSemaphoreTake(s_rx_lock, pdMS_TO_TICKS(20)) != pdTRUE) {
+    *frames_read = 0;
+    if (s_rx_lock && xSemaphoreTake(s_rx_lock, pdMS_TO_TICKS(20)) != pdTRUE)
         return ESP_ERR_TIMEOUT;
-    }
+
+    /* frames 表示立体声帧；每帧包含左/右两个 32-bit slot。 */
+    const size_t bytes_wanted = frames * 2 * sizeof(int32_t);
     size_t bytes_read = 0;
-    esp_err_t err = i2s_channel_read(s_rx, buf, frames * sizeof(int32_t), &bytes_read,
+    esp_err_t err = i2s_channel_read(s_rx, buf, bytes_wanted, &bytes_read,
                                      pdMS_TO_TICKS(50));
     if (s_rx_lock) xSemaphoreGive(s_rx_lock);
-    /* 即使只读到部分数据也视为成功（调用方用 bytes_read 处理） */
-    return err;
+    *frames_read = bytes_read / (2 * sizeof(int32_t));
+    if (err != ESP_OK && *frames_read == 0) return err;
+    return *frames_read > 0 ? ESP_OK : ESP_ERR_TIMEOUT;
 }
-
 esp_err_t i2s_audio_read(int32_t *buf, size_t frames)
 {
     if (s_rx == NULL || buf == NULL) {

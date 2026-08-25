@@ -54,6 +54,8 @@ static int s_listen_fd = -1;
 static int s_udp_fd = -1;
 static int s_client_fd = -1;
 static bool s_task_started;
+/* Keep the NVS configuration out of the UDP broadcast task stack. */
+static net_config_t s_broadcast_cfg;
 
 /* 跨任务发送锁 */
 static SemaphoreHandle_t s_send_lock;
@@ -411,14 +413,13 @@ static void broadcast_task(void *arg)
     {
         if (net_wifi_is_connected() || net_wifi_is_provisioning())
         {
-            net_config_t cfg;
-            net_config_load(&cfg);
+            net_config_load(&s_broadcast_cfg);
             char json[256];
             snprintf(json, sizeof(json),
                      "{\"id\":\"%s\",\"name\":\"%s\",\"tcpPort\":%u,\"wsPort\":9001}",
                      net_config_device_id(),
-                     cfg.name[0] ? cfg.name : NET_CFG_DEFAULT_NAME,
-                     (unsigned)cfg.tcp_port);
+                     s_broadcast_cfg.name[0] ? s_broadcast_cfg.name : NET_CFG_DEFAULT_NAME,
+                     (unsigned)s_broadcast_cfg.tcp_port);
 
             struct sockaddr_in to = {0};
             to.sin_family = AF_INET;
@@ -444,7 +445,7 @@ esp_err_t net_tcp_start(void)
 
     if (xTaskCreate(tcp_task, "tcp_server", 8192, NULL, 5, NULL) != pdPASS)
         return ESP_ERR_NO_MEM;
-    if (xTaskCreate(broadcast_task, "udp_bcast", 4096, NULL, 4, NULL) != pdPASS)
+    if (xTaskCreate(broadcast_task, "udp_bcast", 6144, NULL, 4, NULL) != pdPASS)
         return ESP_ERR_NO_MEM;
 
     s_task_started = true;

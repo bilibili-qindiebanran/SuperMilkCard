@@ -1,6 +1,7 @@
 #include "audio_voice.h"
 
 #include <string.h>
+#include <stdint.h>
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -61,29 +62,67 @@ static void voice_task(void *arg)
     {
         while (!s_recording) vTaskDelay(pdMS_TO_TICKS(20));
         size_t pcm_len = 0;
+        uint32_t read_ok = 0;
+        uint32_t read_fail = 0;
+        uint32_t nonzero = 0;
+        int32_t peak = 0;
+        uint64_t abs_sum = 0;
+        TickType_t last_diag = xTaskGetTickCount();
+        TickType_t last_read_warn = 0;
         i2s_audio_set_rx_exclusive(true);
-        ESP_LOGI(TAG, "recording locally for ESP32 STT");
+        ESP_LOGI(TAG, "recording locally for ESP32 STT (I2S 48k stereo -> 16k mono)");
 
         while (s_recording && pcm_len + sizeof(out) <= MAX_PCM_BYTES)
         {
-            if (i2s_audio_read_voice(in, CHUNK_FRAMES) != ESP_OK)
+            size_t frames_read = 0;
+            esp_err_t read_err = i2s_audio_read_voice(in, CHUNK_FRAMES, &frames_read);
+            if (read_err != ESP_OK)
             {
+                read_fail++;
+                if ((xTaskGetTickCount() - last_read_warn) >= pdMS_TO_TICKS(1000))
+                {
+                    ESP_LOGW(TAG, "I2S capture read failed: %s (ok=%lu fail=%lu)",
+                             esp_err_to_name(read_err), (unsigned long)read_ok, (unsigned long)read_fail);
+                    last_read_warn = xTaskGetTickCount();
+                }
                 vTaskDelay(pdMS_TO_TICKS(5));
                 continue;
             }
-            for (int i = 0; i < CHUNK_OUT; i++)
+            read_ok++;
+            size_t output_samples = frames_read / DECIMATION;
+            if (output_samples > CHUNK_OUT) output_samples = CHUNK_OUT;
+            for (size_t i = 0; i < output_samples; i++)
             {
+                /* Current ICS-43434 driver data is scaled from the upper 16 bits. */
                 int32_t sample = in[i * DECIMATION * 2] >> 16;
+                int32_t abs_sample = sample < 0 ? -sample : sample;
+                if (abs_sample > peak) peak = abs_sample;
+                if (abs_sample > 0) nonzero++;
+                abs_sum += (uint32_t)abs_sample;
                 if (sample > 32767) sample = 32767;
                 if (sample < -32768) sample = -32768;
                 out[i] = (int16_t)sample;
             }
-            memcpy(pcm + pcm_len, out, sizeof(out));
-            pcm_len += sizeof(out);
+            size_t output_bytes = output_samples * sizeof(int16_t);
+            memcpy(pcm + pcm_len, out, output_bytes);
+            pcm_len += output_bytes;
+            if ((xTaskGetTickCount() - last_diag) >= pdMS_TO_TICKS(500))
+            {
+                uint32_t samples = (uint32_t)(pcm_len / sizeof(int16_t));
+                ESP_LOGI(TAG, "capture status: ok=%lu fail=%lu pcm=%uB samples=%lu nonzero=%lu peak=%ld avg_abs=%lu",
+                         (unsigned long)read_ok, (unsigned long)read_fail, (unsigned)pcm_len,
+                         (unsigned long)samples, (unsigned long)nonzero, (long)peak,
+                         (unsigned long)(samples ? abs_sum / samples : 0));
+                last_diag = xTaskGetTickCount();
+            }
         }
         if (pcm_len + sizeof(out) > MAX_PCM_BYTES) s_recording = false;
         i2s_audio_set_rx_exclusive(false);
 
+        ESP_LOGI(TAG, "recording stopped: pcm=%uB duration=%ums ok=%lu fail=%lu nonzero=%lu peak=%ld avg_abs=%lu",
+                 (unsigned)pcm_len, (unsigned)(pcm_len / 32), (unsigned long)read_ok,
+                 (unsigned long)read_fail, (unsigned long)nonzero, (long)peak,
+                 (unsigned long)(pcm_len ? abs_sum / (pcm_len / sizeof(int16_t)) : 0));
         if (pcm_len == 0) continue;
         text[0] = '\0';
         esp_err_t err = stt_dashscope_transcribe(pcm, pcm_len, text, sizeof(text));

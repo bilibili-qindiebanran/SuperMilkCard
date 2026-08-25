@@ -406,6 +406,7 @@ esp_err_t net_portal_start(void)
     if (s_server) return ESP_OK;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.stack_size = 16384;
     config.server_port = NET_PORTAL_PORT;
     config.max_open_sockets = 4;
     config.max_uri_handlers = 6;
