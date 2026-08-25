@@ -85,24 +85,31 @@ lv_display_t *ui_port_display_create(void)
         return s_disp;
     }
 
-    /* PARTIAL 双缓冲（DMA 内存）：只发送脏区域，优先保证触摸响应和帧率。 */
+    /* PARTIAL 双缓冲：LVGL 缓冲区优先放 PSRAM。lcd_ui_flush_area() 会在提交 DMA 前
+     * 复制到内部 RAM 的 s_fb_chunk，因此这里不要求 LVGL 缓冲区本身具备 DMA 能力。 */
     const uint32_t buf_bytes = UI_DISP_BUF_BYTES;
-    s_buf1 = heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    s_buf1 = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_buf1 == NULL)
+        s_buf1 = heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     if (s_buf1 == NULL)
     {
-        ESP_LOGE(TAG, "buf1 alloc failed");
+        ESP_LOGE(TAG, "buf1 alloc failed: bytes=%lu largest8=%lu",
+                 (unsigned long)buf_bytes,
+                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         return NULL;
     }
-    s_buf2 = heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    s_buf2 = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_buf2 == NULL)
+        s_buf2 = heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     if (s_buf2 == NULL)
     {
-        ESP_LOGE(TAG, "buf2 alloc failed");
+        ESP_LOGE(TAG, "buf2 alloc failed: bytes=%lu largest8=%lu",
+                 (unsigned long)buf_bytes,
+                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         free(s_buf1);
         s_buf1 = NULL;
         return NULL;
-    }
-
-    /* LVGL 原生创建为产品横屏 480×320。 */
+    }/* LVGL 原生创建为产品横屏 480×320。 */
     s_disp = lv_display_create(UI_DISP_HOR_RES, UI_DISP_VER_RES);
     if (s_disp == NULL)
     {
@@ -119,7 +126,7 @@ lv_display_t *ui_port_display_create(void)
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(s_disp, ui_port_flush_cb);
 
-    ESP_LOGI(TAG, "display created: 480x320 PARTIAL DMA dual %lu-byte buffers",
+    ESP_LOGI(TAG, "display created: 480x320 PARTIAL dual %lu-byte buffers (PSRAM preferred)",
              (unsigned long)buf_bytes);
     return s_disp;
 }
