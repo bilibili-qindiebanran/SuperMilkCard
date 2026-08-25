@@ -180,6 +180,11 @@ static void handle_text_payload(const char *json, size_t len)
     {
         music_player_finish();
     }
+    else if (strcmp(type, "music_stop") == 0)
+    {
+        ESP_LOGI(TAG, "music stop requested");
+        music_player_stop();
+    }
 
     free(buf);
 }

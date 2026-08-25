@@ -14,6 +14,7 @@ static const char *RELEASE_SONG_JSON =
     "{\"type\":\"music_play\",\"title\":\"释怀\",\"url\":\""
     "https://www.bilibili.com/video/BV16XdHYGExU"
     "\"}";
+static const char *STOP_MUSIC_JSON = "{\"type\":\"music_stop\"}";
 
 static void release_click_cb(lv_event_t *event)
 {
@@ -28,6 +29,22 @@ static void release_click_cb(lv_event_t *event)
     {
         if (title_label) lv_label_set_text(title_label, UI_STR_MUSIC_RELEASE_TITLE);
         app_state_publish_media(true, true, UI_STR_MUSIC_RELEASE_TITLE, "关羽之歌");
+    }
+}
+
+static void stop_click_cb(lv_event_t *event)
+{
+    lv_obj_t *title_label = (lv_obj_t *)lv_event_get_user_data(event);
+    if (!net_tcp_is_client_connected())
+    {
+        if (title_label) lv_label_set_text(title_label, UI_STR_MUSIC_RELEASE_OFFLINE);
+        return;
+    }
+
+    if (net_tcp_send_json(STOP_MUSIC_JSON) == ESP_OK)
+    {
+        if (title_label) lv_label_set_text(title_label, UI_STR_MUSIC_PLACE);
+        app_state_publish_media(false, false, UI_STR_MUSIC_PLACE, "");
     }
 }
 
@@ -77,5 +94,14 @@ lv_obj_t *ui_page_music_create(lv_obj_t *parent)
     lv_label_set_text(button_label, UI_STR_MUSIC_RELEASE);
     lv_obj_center(button_label);
     lv_obj_add_event_cb(button, release_click_cb, LV_EVENT_CLICKED, title_label);
+
+    lv_obj_t *stop_button = lv_button_create(card);
+    lv_obj_set_size(stop_button, 100, 40);
+    lv_obj_align(stop_button, LV_ALIGN_BOTTOM_RIGHT, -(UI_GAP * 2 + 100), -UI_GAP);
+    ui_theme_apply_button(stop_button, false);
+    lv_obj_t *stop_label = lv_label_create(stop_button);
+    lv_label_set_text(stop_label, UI_STR_MUSIC_STOP);
+    lv_obj_center(stop_label);
+    lv_obj_add_event_cb(stop_button, stop_click_cb, LV_EVENT_CLICKED, title_label);
     return page;
 }

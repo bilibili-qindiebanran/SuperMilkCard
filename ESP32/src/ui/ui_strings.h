@@ -102,6 +102,7 @@
 #define UI_STR_MUSIC_HINT    "预留串口、Wi-Fi 与 Windows 媒体同步"
 #define UI_STR_MUSIC_CONNECT "连接设备"
 #define UI_STR_MUSIC_RELEASE "释怀"
+#define UI_STR_MUSIC_STOP "停止"
 #define UI_STR_MUSIC_RELEASE_TITLE "关羽之歌"
 #define UI_STR_MUSIC_RELEASE_HINT "点击后通过 Windows 播放网易云音乐"
 #define UI_STR_MUSIC_RELEASE_OFFLINE "请先连接 Windows"

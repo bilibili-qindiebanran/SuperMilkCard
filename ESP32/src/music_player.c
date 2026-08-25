@@ -270,6 +270,8 @@ void music_player_stop(void)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_stop_requested = true;
     s_finished = true;
+    s_started = false;
     xSemaphoreGive(s_lock);
     xSemaphoreGive(s_data_ready);
+    ESP_LOGI(TAG, "MP3 stream stopped");
 }

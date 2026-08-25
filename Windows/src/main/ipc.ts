@@ -27,6 +27,7 @@ import {
   getStatus as getEsp32Status,
   listDevices,
   playMusicOnEsp32,
+  stopMusicOnEsp32,
   sendChat,
   sendLive2dState,
   sendTts
@@ -235,6 +236,10 @@ export function registerIpc(): void {
     void playMusicOnEsp32(command.url).then((result) => {
       if (!result.ok && result.message) broadcast('esp32:error', { message: result.message })
     })
+  })
+  esp32Emitter.on('music-stop', () => {
+    const result = stopMusicOnEsp32()
+    if (!result.ok && result.message) broadcast('esp32:error', { message: result.message })
   })
   esp32Emitter.on('error', (m) => broadcast('esp32:error', m))
   perfEmitter.on('sample', (s) => broadcast('perf:sample', s))

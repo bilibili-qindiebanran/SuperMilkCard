@@ -42,6 +42,7 @@ let manuallyDisconnected = false
 
 let audioMeta: AudioMeta | null = null
 let audioChunks: Buffer[] = []
+let musicAbortController: AbortController | null = null
 
 /* ---------------- 设备发现 ---------------- */
 
@@ -264,6 +265,9 @@ function handleText(payload: Buffer): void {
       if (title && url) emitter.emit('music-play', { title, url } satisfies Esp32MusicCommand)
       break
     }
+    case 'music_stop':
+      emitter.emit('music-stop')
+      break
     default:
       emitter.emit('text', { content: msg.content ?? payload.toString('utf-8') })
   }
@@ -352,6 +356,10 @@ function writeSocketBuffer(data: Buffer): Promise<void> {
 async function playMusicOnEsp32(songUrl: string): Promise<Esp32SendResult> {
   if (!socket || status.state !== 'connected') return { ok: false, message: 'ESP32 未连接' }
 
+  musicAbortController?.abort()
+  const abortController = new AbortController()
+  musicAbortController = abortController
+
   try {
     const song = new URL(songUrl)
     if (
@@ -366,7 +374,8 @@ async function playMusicOnEsp32(songUrl: string): Promise<Esp32SendResult> {
         Accept: 'audio/mpeg',
         Referer: 'https://music.163.com/'
       },
-      redirect: 'follow'
+      redirect: 'follow',
+      signal: abortController.signal
     })
     if (!response.ok || !response.body) {
       return { ok: false, message: `ESP32 本地音频获取失败（HTTP ${response.status}）` }
@@ -397,8 +406,19 @@ async function playMusicOnEsp32(songUrl: string): Promise<Esp32SendResult> {
     await writeSocketBuffer(encodeTextFrame({ type: 'audio_end' }))
     return { ok: true }
   } catch (err) {
+    if (abortController.signal.aborted) return { ok: true }
     return { ok: false, message: err instanceof Error ? err.message : String(err) }
+  } finally {
+    if (musicAbortController === abortController) musicAbortController = null
   }
+}
+
+function stopMusicOnEsp32(): Esp32SendResult {
+  musicAbortController?.abort()
+  musicAbortController = null
+  if (!socket || status.state !== 'connected') return { ok: false, message: 'ESP32 未连接' }
+  socket.write(encodeTextFrame({ type: 'music_stop' }))
+  return { ok: true }
 }
 
 async function sendTts(text: string): Promise<Esp32SendResult> {
@@ -459,5 +479,6 @@ export {
   sendChat,
   sendTts,
   playMusicOnEsp32,
+  stopMusicOnEsp32,
   sendLive2dState
 }
