@@ -6,6 +6,8 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/portmacro.h"
+#include "network/net_wifi.h"
 #include "i2s_audio.h"
 #include "network/net_tcp.h"
 #include "stt_dashscope.h"
@@ -19,6 +21,9 @@
 
 static TaskHandle_t s_task;
 static volatile bool s_recording;
+static portMUX_TYPE s_sink_mux = portMUX_INITIALIZER_UNLOCKED;
+static audio_voice_text_cb_t s_text_sink;
+static void *s_text_sink_ctx;
 
 static size_t json_escape(char *out, size_t cap, const char *text)
 {
@@ -129,12 +134,22 @@ static void voice_task(void *arg)
         if (err == ESP_OK && text[0])
         {
             ESP_LOGI(TAG, "STT result: %s", text);
-            send_voice_text(text);
+            audio_voice_text_cb_t sink;
+            void *sink_ctx;
+            portENTER_CRITICAL(&s_sink_mux);
+            sink = s_text_sink;
+            sink_ctx = s_text_sink_ctx;
+            portEXIT_CRITICAL(&s_sink_mux);
+            if (sink)
+                sink(text, sink_ctx);
+            else if (net_tcp_is_client_connected())
+                send_voice_text(text);
         }
         else
         {
             ESP_LOGE(TAG, "STT failed: %s", esp_err_to_name(err));
-            net_tcp_send_json("{\"type\":\"voice_error\",\"message\":\"ESP32 STT failed\"}");
+            if (net_tcp_is_client_connected())
+                net_tcp_send_json("{\"type\":\"voice_error\",\"message\":\"ESP32 STT failed\"}");
         }
     }
 }
@@ -142,7 +157,7 @@ static void voice_task(void *arg)
 esp_err_t audio_voice_start(void)
 {
     if (s_recording) return ESP_ERR_INVALID_STATE;
-    if (!net_tcp_is_client_connected()) return ESP_ERR_NOT_FOUND;
+    if (!net_tcp_is_client_connected() && !net_wifi_is_connected()) return ESP_ERR_NOT_FOUND;
     s_recording = true;
     return ESP_OK;
 }
@@ -163,4 +178,11 @@ esp_err_t audio_voice_init(void)
     if (xTaskCreate(voice_task, "audio_voice", 10240, NULL, 4, &s_task) != pdPASS)
         return ESP_ERR_NO_MEM;
     return ESP_OK;
+}
+void audio_voice_set_text_sink(audio_voice_text_cb_t cb, void *user_ctx)
+{
+    portENTER_CRITICAL(&s_sink_mux);
+    s_text_sink = cb;
+    s_text_sink_ctx = user_ctx;
+    portEXIT_CRITICAL(&s_sink_mux);
 }
