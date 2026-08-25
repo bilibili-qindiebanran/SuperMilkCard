@@ -12,7 +12,7 @@
 
 static const char *RELEASE_SONG_JSON =
     "{\"type\":\"music_play\",\"title\":\"释怀\",\"url\":\""
-    "https://music.163.com/song?id=1345751384&uct2=U2FsdGVkX1+vHXtdBH5HmrUwnNHS+as3wzJtHMsaU78="
+    "https://www.bilibili.com/video/BV16XdHYGExU"
     "\"}";
 
 static void release_click_cb(lv_event_t *event)

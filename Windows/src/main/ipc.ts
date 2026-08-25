@@ -40,16 +40,15 @@ import {
 
 const active = new Map<string, AbortController>()
 const RELEASE_SONG_URL =
-  'https://music.163.com/song?id=1345751384&uct2=U2FsdGVkX1+vHXtdBH5HmrUwnNHS+as3wzJtHMsaU78='
+  'https://www.bilibili.com/video/BV16XdHYGExU'
 
 function isAllowedMusicUrl(value: string): boolean {
   try {
     const url = new URL(value)
     return (
       url.protocol === 'https:' &&
-      url.hostname === 'music.163.com' &&
-      url.pathname === '/song' &&
-      url.searchParams.get('id') === '1345751384'
+      (url.hostname === 'www.bilibili.com' || url.hostname === 'bilibili.com') &&
+      url.pathname === '/video/BV16XdHYGExU'
     )
   } catch {
     return false
