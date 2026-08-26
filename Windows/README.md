@@ -36,6 +36,9 @@
 - **语音转文字（STT）**：系统语音识别（`SpeechRecognition`，免费）或 Whisper 兼容 `/audio/transcriptions` 云端转写；支持语音输入。
 - **主题**：浅色 / 深色主题切换（CSS 变量 + naive-ui `darkTheme`，粉色主色调）。
 - **Live2D 交互**：滚轮缩放、拖拽平移；点击形象可触发动作。
+- **AstrBot 后端接入**：可选把对话核心交给 AstrBot（AstrAlive 插件，经 WebSocket），与内置 LLM 直接转发两种模式并存；会话 ID 自动生成并持久化。
+- **ESP32 硬件伴侣**：UDP 局域网自动发现 + TCP 业务通道 + WebSocket 性能推送，把 Live2D 表情/动作/回复摘要同步到 ESP32 侧互动终端。
+- **性能监测**：采集 CPU / GPU / 内存使用率，可选通过 WebSocket 实时推送到 ESP32。
 
 ## 技术栈
 
@@ -90,6 +93,7 @@ npm run build:linux   # Linux：AppImage / snap / deb
 2. 在「人格」里选择/编辑机器人人设（内置三种，可自定义）。
 3. 回到「聊天」页开始对话；AI 带 `[emotion: …]` 标签的回复会自动驱动 Live2D 表情与动作。
 4. 可选：在「语音 / Live2D」里启用 TTS/STT、切换或导入模型、调整主题。
+5. 可选：在「ESP32」里启用硬件伴侣、触发局域网设备发现并连接；或切换到「AstrBot」后端接入对话核心。
 
 ## 配置持久化
 
@@ -125,6 +129,7 @@ npm run build:linux   # Linux：AppImage / snap / deb
 | `onDone(cb)` | `llm:done` | main→renderer | 正常完成（含完整文本） |
 | `onError(cb)` | `llm:error` | main→renderer | 出错（含 message） |
 | `onAborted(cb)` | `llm:aborted` | main→renderer | 被中断 |
+| `classify(items)` | `llm:classify` | renderer→main | LLM 预填表情情绪标注，返回 表达式 id → 语义@等级 |
 
 ### `window.api.settings`
 
@@ -146,6 +151,47 @@ npm run build:linux   # Linux：AppImage / snap / deb
 | `live2d.importModel(sourcePath)` | `live2d:import` | 导入本地模型文件夹 |
 | `live2d.getPathForFile(file)` | — | 由 `webUtils.getPathForFile` 解析拖拽文件路径 |
 
+### `window.api.esp32`
+
+| 方法 / 事件 | 通道 | 方向 | 说明 |
+|---|---|---|---|
+| `connect()` | `esp32:connect` | renderer→main | 建立 TCP 连接 |
+| `disconnect()` | `esp32:disconnect` | renderer→main | 断开连接 |
+| `getStatus()` | `esp32:get-status` | renderer→main | 读取连接状态 |
+| `discover()` | `esp32:discover` | renderer→main | 触发一次局域网设备发现 |
+| `listDevices()` | `esp32:list-devices` | renderer→main | 获取已发现的设备列表 |
+| `sendChat(role, content)` | `esp32:send-chat` | renderer→main | 发送聊天文本到 ESP32 |
+| `sendTts(text)` | `esp32:send-tts` | renderer→main | TTS 后发送 MP3 到 ESP32 |
+| `sendLive2dState(state)` | `esp32:send-live2d-state` | renderer→main | 下发 Live2D 表情/动作/摘要 |
+| `onStatus(cb)` | `esp32:status` | main→renderer | 连接状态变化 |
+| `onDevices(cb)` | `esp32:devices` | main→renderer | 设备列表更新 |
+| `onText(cb)` | `esp32:text` | main→renderer | ESP32 文本消息 |
+| `onVoiceText(cb)` | `esp32:voice-text` | main→renderer | ESP32 语音转写结果 |
+| `onLive2dCommand(cb)` | `esp32:live2d-command` | main→renderer | ESP32 互动页命令 |
+| `onError(cb)` | `esp32:error` | main→renderer | 出错 |
+
+### `window.api.perf`
+
+| 方法 / 事件 | 通道 | 方向 | 说明 |
+|---|---|---|---|
+| `start()` | `perf:start` | renderer→main | 开始性能采样 |
+| `stop()` | `perf:stop` | renderer→main | 停止采样 |
+| `getLatest()` | `perf:get-latest` | renderer→main | 读取最新采样值 |
+| `onSample(cb)` | `perf:sample` | main→renderer | 推送采样值（可选 WebSocket 至 ESP32） |
+
+### `window.api.astrbot`
+
+| 方法 / 事件 | 通道 | 方向 | 说明 |
+|---|---|---|---|
+| `connect()` | `astrbot:connect` | renderer→main | 连接 AstrBot（AstrAlive）插件 |
+| `disconnect()` | `astrbot:disconnect` | renderer→main | 断开连接 |
+| `getStatus()` | `astrbot:get-status` | renderer→main | 读取连接状态 |
+| `sendMessage(req)` | `astrbot:send-message` | renderer→main | 委托发送消息（`req = { chatId, content, images?, systemPromptExtra? }`） |
+| `stop()` | `astrbot:stop` | renderer→main | 中断当前回复 |
+| `onStatus(cb)` | `astrbot:status` | main→renderer | 连接状态变化 |
+
+> AstrBot 的 `chunk / done / error` 事件复用 `llm:*` 通道回推，渲染层现有 `onChunk/onDone/onError` 无需改动。
+
 ## Live2D 模型说明
 
 - 内置示例模型 **Mao**（Live2D Cubism 官方示例猫娘，位于 `src/renderer/public/live2d/mao/`）与 Cubism 4 核心运行时 `live2dcubismcore.min.js`。
@@ -159,13 +205,17 @@ npm run build:linux   # Linux：AppImage / snap / deb
 src/
 ├─ main/                    # 主进程
 │  ├─ index.ts              # 窗口创建 + 注册 live2d:// 协议
-│  ├─ ipc.ts                # IPC 通道注册（settings / llm / tts / stt / live2d）
+│  ├─ ipc.ts                # IPC 通道注册（settings / llm / tts / stt / live2d / esp32 / perf / astrbot）
 │  └─ services/
 │     ├─ llm.ts             # OpenAI 兼容流式请求（SSE，逐 token 推送）
 │     ├─ tts.ts             # 云 TTS 合成（/audio/speech）
 │     ├─ stt.ts             # 云 STT 转写（/audio/transcriptions）
 │     ├─ settings.ts        # settings.json 读写（深合并 + 缓存，含密钥写入）
-│     └─ live2dModels.ts    # 模型扫描 / 导入 / live2d:// 资源定位
+│     ├─ live2dModels.ts    # 模型扫描 / 导入 / live2d:// 资源定位
+│     ├─ astrbot.ts         # AstrBot（AstrAlive 插件）WebSocket 接入
+│     ├─ esp32.ts           # ESP32 发现 / TCP 收发（聊天、音频、Live2D 状态）
+│     ├─ framing.ts         # ESP32 TCP 帧编解码（魔数 + 长度、粘包/半包处理）
+│     └─ perfMonitor.ts     # CPU / GPU / 内存采样与 WebSocket 推送
 ├─ preload/                 # contextBridge 暴露 window.api
 │  ├─ index.ts
 │  └─ index.d.ts            # window.api / window.electron 类型声明
@@ -177,8 +227,8 @@ src/
    ├─ index.html            # CSP 收紧、加载 Cubism Core、标题
    └─ src/
       ├─ views/             # ChatView / SettingsView
-      ├─ components/        # live2d/Live2DStage 等
-      ├─ stores/            # chat / settings / live2d / audio（Pinia）
+      ├─ components/        # live2d/Live2DStage、ApiKeySetting、Versions
+      ├─ stores/            # chat / settings / live2d / audio / esp32 / perf / astrbot（Pinia）
       ├─ services/          # live2dModel（表情语义推理）、speech（TTS/STT）
       ├─ router/            # hash 路由
       └─ public/live2d/     # Live2D 模型资源（内置 Mao + Cubism Core）
@@ -197,11 +247,16 @@ src/
    ├─ llm.ts       → 外部 LLM（SSE 流式，拼装 Authorization）
    ├─ tts.ts       → 外部 /audio/speech
    ├─ stt.ts       → 外部 /audio/transcriptions
+   ├─ astrbot.ts   → AstrBot 插件（WebSocket，对话核心可选）
+   ├─ esp32.ts     → ESP32（TCP 发现/收发，配合 framing.ts）
+   ├─ perfMonitor.ts → 系统性能采样（可选经 WebSocket 到 ESP32）
    └─ settings.ts  → userData/settings.json（密钥仅存于此）
 ```
 
 - 渲染进程受 CSP 限制，**不直接外网请求**；所有外网调用统一放入主进程，通过 IPC 与渲染进程通信。
 - **流式聊天链路**：渲染层发 `llm:chat-stream` → 主进程逐 token 推送 `llm:chunk` → 结束推 `llm:done`（携带完整文本）→ 出错推 `llm:error` → 用户取消推 `llm:aborted`。
+- **AstrBot 链路**：渲染层发 `astrbot:send-message` → 主进程经 WebSocket 转发给 AstrBot，`token / done / error` 事件复用 `llm:*` 通道回推。
+- **ESP32 链路**：主进程 UDP 监听设备发现广播 → 选择设备建立 TCP（HELLO 校验识别码）→ 双向收发聊天/音频/Live2D 状态帧；性能数据经 WebSocket 推送。
 - **Live2D 资源链路**：渲染层通过 `live2d://<相对路径>` 加载 → `protocol.handle('live2d')` 依次到「用户导入目录 / 内置目录」读取 → 返回带正确 `Content-Type` 的资源。
 - **表情驱动链路**：`llm:chunk` 累积文本 → 情绪解析剥离 `[emotion:…]` / `[action:…]` → 推送给 Live2D 舞台 → 通过表情语义双层推理驱动表情/动作。
 
@@ -211,12 +266,16 @@ src/
 - **点「说话」没有声音**：检查 TTS 配置；若用云端 TTS 需配置 Base URL / API Key，否则回退用系统语音。
 - **语音输入无效**：确认浏览器/系统允许麦克风权限；云端 STT 需配置 base URL 与 key。
 - **Live2D 模型不显示**：确认「设置 → Live2D 形象」已选中模型；导入的模型文件夹需包含 `*.model3.json`。
+- **ESP32 连接不上**：确认 ESP32 已上电且与电脑同一局域网；软件设置页启用 ESP32 并点击「发现设备」后选择连接；识别码需与设备一致。
+- **AstrBot 不回复**：确认 AstrBot（AstrAlive 插件）已启动、启用并监听对应端口；「设置 → AstrBot」中的主机/端口正确。
 - **想换回默认配置**：在「设置」页使用「重置为默认」。
 - **改动未生效**：配置保存于 `userData/settings.json`，必要时可在设置页手动清除或重置。
 
 ## 相关文档
 
 - 产品与技术开发计划：[`docs/PLAN.md`](docs/PLAN.md)
+- ESP32 安装与调试：[`../ESP32/docs/esp32-platform-安装指南.md`](../ESP32/docs/esp32-platform-安装指南.md)、[`../ESP32/docs/esp32-vscode调试指南.md`](../ESP32/docs/esp32-vscode调试指南.md)
+- 桌面端 ↔ ESP32 通信协议：[`../ESP32/接口文档.md`](../ESP32/接口文档.md)
 
 ## 许可
 
