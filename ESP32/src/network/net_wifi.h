@@ -42,6 +42,12 @@ esp_err_t net_wifi_forget(void);
 /** @brief 当前 STA 是否已连上并获得 IP（供 TCP 服务端判断是否可启动） */
 bool net_wifi_is_connected(void);
 
+/**
+ * @brief 获取 STA IPv4 地址（点分十进制）。
+ * @return true 已获取并写入 out（如 "192.168.1.123"）；false 未连接/无 IP（out 置空串）
+ */
+bool net_wifi_get_sta_ip(char *out, size_t out_size);
+
 #ifdef __cplusplus
 }
 #endif

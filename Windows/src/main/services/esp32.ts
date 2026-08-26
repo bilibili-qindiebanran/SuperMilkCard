@@ -5,6 +5,7 @@ import type {
   Esp32Config,
   Esp32Device,
   Esp32Live2dState,
+  Esp32MusicCommand,
   Esp32SendResult,
   Esp32Status,
   Esp32ConnectionState
@@ -26,6 +27,9 @@ interface AudioMeta {
 
 const emitter = new EventEmitter()
 
+const RELEASE_SONG_AUDIO_URL =
+  'http://music.163.com/song/media/outer/url?id=1345751384.mp3'
+
 const devices = new Map<string, Esp32Device>()
 let udpSocket: UdpSocket | null = null
 
@@ -38,6 +42,7 @@ let manuallyDisconnected = false
 
 let audioMeta: AudioMeta | null = null
 let audioChunks: Buffer[] = []
+let musicAbortController: AbortController | null = null
 
 /* ---------------- 设备发现 ---------------- */
 
@@ -131,9 +136,11 @@ function openTcp(host: string, port: number, cfg: Esp32Config): void {
   })
   sock.on('data', (chunk: Buffer) => handleData(chunk, cfg))
   sock.on('error', (err) => {
+    console.warn('[esp32] TCP socket error:', err.message)
     setStatus('error', err.message, false)
   })
-  sock.on('close', () => {
+  sock.on('close', (hadError) => {
+    console.warn('[esp32] TCP socket closed:', { hadError, manuallyDisconnected })
     if (socket === sock) socket = null
     decoder.reset()
     audioMeta = null
@@ -200,7 +207,18 @@ function handleHello(payload: Buffer, cfg: Esp32Config): void {
 }
 
 function handleText(payload: Buffer): void {
-  let msg: { type?: string; content?: string; format?: string; sampleRate?: number; channels?: number; bits?: number }
+  let msg: {
+    type?: string
+    content?: string
+    text?: string
+    message?: string
+    title?: string
+    url?: string
+    format?: string
+    sampleRate?: number
+    channels?: number
+    bits?: number
+  }
   try {
     msg = JSON.parse(payload.toString('utf-8')) as typeof msg
   } catch {
@@ -213,6 +231,8 @@ function handleText(payload: Buffer): void {
       emitter.emit('text', { content: msg.content ?? '' })
       break
     case 'audio_start':
+    case 'voice_start':
+      /* voice_start 为 ESP32 语音上行（16k/1ch/16bit PCM），语义同 audio_start */
       audioMeta = {
         format: msg.format ?? 'pcm',
         sampleRate: msg.sampleRate ?? 16000,
@@ -222,10 +242,17 @@ function handleText(payload: Buffer): void {
       audioChunks = []
       break
     case 'audio_end':
+    case 'voice_end':
       void finalizeVoice()
       break
     case 'chat':
       emitter.emit('text', { content: msg.content ?? '' })
+      break
+    case 'voice_text':
+      emitter.emit('voice-text', { text: msg.text ?? '' })
+      break
+    case 'voice_error':
+      emitter.emit('error', { message: msg.message ?? 'ESP32 STT 失败' })
       break
     case 'live2d_command': {
       const command = (msg as { command?: string }).command
@@ -234,6 +261,15 @@ function handleText(payload: Buffer): void {
       }
       break
     }
+    case 'music_play': {
+      const title = typeof msg.title === 'string' ? msg.title : ''
+      const url = typeof msg.url === 'string' ? msg.url : ''
+      if (title && url) emitter.emit('music-play', { title, url } satisfies Esp32MusicCommand)
+      break
+    }
+    case 'music_stop':
+      emitter.emit('music-stop')
+      break
     default:
       emitter.emit('text', { content: msg.content ?? payload.toString('utf-8') })
   }
@@ -275,6 +311,17 @@ async function finalizeVoice(): Promise<void> {
   const pcm = Buffer.concat(audioChunks)
   audioChunks = []
   const wav = pcmToWav(pcm, meta.sampleRate, meta.channels, meta.bits)
+  // 调试：保存 ESP32 录音 WAV 供本地 STT 调试验证
+  try {
+    const { writeFile } = await import('fs/promises')
+    const { join } = await import('path')
+    const { tmpdir } = await import('os')
+    const p = join(tmpdir(), `esp32_mic_${Date.now()}.wav`)
+    await writeFile(p, wav)
+    console.log('[esp32] saved mic wav:', p, wav.length, 'bytes')
+  } catch {
+    /* 忽略保存失败 */
+  }
   try {
     const { text } = await transcribe({ audioBase64: wav.toString('base64'), mimeType: 'audio/wav' })
     if (text.trim()) emitter.emit('voice-text', { text: text.trim() })
@@ -288,6 +335,91 @@ async function finalizeVoice(): Promise<void> {
 function sendChat(role: 'user' | 'assistant', content: string): Esp32SendResult {
   if (!socket || status.state !== 'connected') return { ok: false, message: 'ESP32 未连接' }
   socket.write(encodeTextFrame({ type: 'chat', role, content }))
+  return { ok: true }
+}
+
+function writeSocketBuffer(data: Buffer): Promise<void> {
+  if (!socket || status.state !== 'connected') return Promise.reject(new Error('ESP32 未连接'))
+  if (socket.write(data)) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const onDrain = (): void => {
+      socket?.off('error', onError)
+      resolve()
+    }
+    const onError = (err: Error): void => {
+      socket?.off('drain', onDrain)
+      reject(err)
+    }
+    socket.once('drain', onDrain)
+    socket.once('error', onError)
+  })
+}
+
+async function playMusicOnEsp32(songUrl: string): Promise<Esp32SendResult> {
+  if (!socket || status.state !== 'connected') return { ok: false, message: 'ESP32 未连接' }
+
+  musicAbortController?.abort()
+  const abortController = new AbortController()
+  musicAbortController = abortController
+
+  try {
+    const song = new URL(songUrl)
+    if (
+      (song.hostname !== 'www.bilibili.com' && song.hostname !== 'bilibili.com') ||
+      song.pathname !== '/video/BV16XdHYGExU'
+    ) {
+      return { ok: false, message: '不支持的 B 站视频地址' }
+    }
+    const mediaUrl = RELEASE_SONG_AUDIO_URL
+    const response = await fetch(mediaUrl, {
+      headers: {
+        Accept: 'audio/mpeg',
+        Referer: 'https://music.163.com/'
+      },
+      redirect: 'follow',
+      signal: abortController.signal
+    })
+    if (!response.ok || !response.body) {
+      return { ok: false, message: `ESP32 本地音频获取失败（HTTP ${response.status}）` }
+    }
+
+    let started = false
+    let pending = Buffer.alloc(0)
+    for await (const chunk of response.body) {
+      const audioChunk = Buffer.from(chunk)
+      if (!started) {
+        pending = Buffer.concat([pending, audioChunk])
+        if (pending.length < 4) continue
+        const prefix = pending.subarray(0, 4)
+        const hasId3 = prefix.subarray(0, 3).toString('ascii') === 'ID3'
+        const hasMpegSync = prefix[0] === 0xff && (prefix[1] & 0xe0) === 0xe0
+        if (!hasId3 && !hasMpegSync) {
+          return { ok: false, message: 'ESP32 本地音频源不是 MP3 音频' }
+        }
+        await writeSocketBuffer(encodeTextFrame({ type: 'audio_start', format: 'mp3' }))
+        started = true
+        await writeSocketBuffer(encodeFrame(FrameType.AUDIO, pending))
+        pending = Buffer.alloc(0)
+        continue
+      }
+      await writeSocketBuffer(encodeFrame(FrameType.AUDIO, audioChunk))
+    }
+    if (!started) return { ok: false, message: 'ESP32 本地音频流为空' }
+    await writeSocketBuffer(encodeTextFrame({ type: 'audio_end' }))
+    return { ok: true }
+  } catch (err) {
+    if (abortController.signal.aborted) return { ok: true }
+    return { ok: false, message: err instanceof Error ? err.message : String(err) }
+  } finally {
+    if (musicAbortController === abortController) musicAbortController = null
+  }
+}
+
+function stopMusicOnEsp32(): Esp32SendResult {
+  musicAbortController?.abort()
+  musicAbortController = null
+  if (!socket || status.state !== 'connected') return { ok: false, message: 'ESP32 未连接' }
+  socket.write(encodeTextFrame({ type: 'music_stop' }))
   return { ok: true }
 }
 
@@ -348,5 +480,7 @@ export {
   resolveTarget,
   sendChat,
   sendTts,
+  playMusicOnEsp32,
+  stopMusicOnEsp32,
   sendLive2dState
 }

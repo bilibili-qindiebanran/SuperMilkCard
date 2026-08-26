@@ -21,9 +21,11 @@
 #include "lcd_ui.h"
 #include "touch.h"
 #include "ui_pages.h"
+#include "pages/ui_page_direct_chat.h"
 #include "pages/ui_page_home.h"
 #include "pages/ui_page_live2d.h"
 #include "pages/ui_page_settings.h"
+#include "pages/ui_page_voice_mode.h"
 #include "ui_port_display.h"
 #include "ui_port_input.h"
 #include "ui_theme.h"
@@ -35,6 +37,18 @@ static void ui_state_refresh_cb(lv_timer_t *timer)
 {
     (void)timer;
 
+    if (ui_pages_direct_chat_active())
+    {
+        ui_page_direct_chat_refresh();
+        return;
+    }
+
+    if (ui_pages_voice_mode_active())
+    {
+        ui_page_voice_mode_refresh();
+        return;
+    }
+
     if (ui_pages_live2d_active())
     {
         ui_page_live2d_refresh();
@@ -44,6 +58,7 @@ static void ui_state_refresh_cb(lv_timer_t *timer)
     if (ui_pages_current() == UI_PAGE_HOME)
     {
         ui_page_home_refresh_fps();
+        ui_page_home_refresh();
     }
 
     if (ui_port_input_is_pressed())

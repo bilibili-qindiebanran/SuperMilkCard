@@ -223,7 +223,7 @@ function onSttFinal(text: string): void {
 
 function toggleListening(): void {
   if (audio.listening) void audio.stopListening()
-  else void audio.startListening(onSttFinal)
+  else void audio.startListening(onSttFinal, (text) => { draft.value = text })
 }
 
 watch(

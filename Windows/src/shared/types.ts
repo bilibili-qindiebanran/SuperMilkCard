@@ -103,6 +103,12 @@ export interface Esp32Config {
   reconnectIntervalMs: number
 }
 
+export type MusicPlaybackTarget = 'pc' | 'esp32'
+
+export interface MusicConfig {
+  playbackTarget: MusicPlaybackTarget
+}
+
 /** 局域网内发现的 ESP32 设备 */
 export interface Esp32Device {
   id: string
@@ -210,6 +216,12 @@ export interface Esp32Live2dCommand {
   command: 'enter' | 'return_home' | 'reconnect'
 }
 
+/** ESP32 请求 Windows 打开指定的网易云音乐歌曲 */
+export interface Esp32MusicCommand {
+  title: string
+  url: string
+}
+
 export type ThemeMode = 'light' | 'dark'
 
 /** 可经 IPC 下发到渲染层的密钥部分（用于设置 Key / 清除 Key） */
@@ -249,6 +261,7 @@ export interface AppSettings {
   stt: SttConfig
   live2d: Live2dConfig
   esp32: Esp32Config
+  music: MusicConfig
   perf: PerfConfig
   astrbot: AstrbotConfig
   theme: ThemeMode
@@ -300,6 +313,7 @@ export interface PublicAppSettings {
   stt: PublicSttConfig
   live2d: Live2dConfig
   esp32: Esp32Config
+  music: MusicConfig
   perf: PerfConfig
   astrbot: AstrbotConfig
   theme: ThemeMode
@@ -314,6 +328,7 @@ export interface SettingsPatch {
   activePersonaId?: string
   live2d?: Live2dConfig
   esp32?: Partial<Esp32Config>
+  music?: Partial<MusicConfig>
   perf?: Partial<PerfConfig>
   astrbot?: Partial<AstrbotConfig>
   theme?: ThemeMode
@@ -353,6 +368,7 @@ export function toPublicSettings(s: AppSettings): PublicAppSettings {
     },
     live2d: s.live2d,
     esp32: s.esp32,
+    music: s.music,
     perf: s.perf,
     astrbot: s.astrbot,
     theme: s.theme
@@ -573,6 +589,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     tcpPort: 9000,
     wsPort: 9001,
     reconnectIntervalMs: 1000
+  },
+  music: {
+    playbackTarget: 'pc'
   },
   perf: {
     enabled: false,

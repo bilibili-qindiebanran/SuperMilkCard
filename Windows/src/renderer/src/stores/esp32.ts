@@ -5,6 +5,7 @@ import type {
   Esp32Live2dState,
   Esp32Status
 } from '@shared/types'
+import { useChatStore } from './chat'
 
 export const useEsp32Store = defineStore('esp32', {
   state: () => ({
@@ -34,6 +35,11 @@ export const useEsp32Store = defineStore('esp32', {
       window.api.esp32.onVoiceText((m) => {
         this.voiceText = m.text
         this.voiceTextVersion += 1
+        // 语音识别结果 → 自动进入 LLM 对话（ESP32 语音联动）
+        if (m.text.trim()) {
+          const chat = useChatStore()
+          if (!chat.streaming) chat.send(m.text.trim())
+        }
       })
       window.api.esp32.onLive2dCommand((c) => {
         this.lastLive2dCommand = c

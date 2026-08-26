@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, shell } from 'electron'
 import type {
   ApiKeySection,
   ApiKeyTestRequest,
@@ -7,10 +7,12 @@ import type {
   ChatStreamRequest,
   EmotionClassifyItem,
   Esp32Live2dState,
+  MusicPlaybackTarget,
   SettingsPatch,
   SttTranscribeRequest,
   TtsSynthesizeRequest
 } from '@shared/types'
+import type { Esp32MusicCommand } from '@shared/types'
 import { toPublicSettings } from '@shared/types'
 import { getSettings, setSettings, resetSettings } from './services/settings'
 import { streamChat, classifyEmotions } from './services/llm'
@@ -24,6 +26,8 @@ import {
   disconnect,
   getStatus as getEsp32Status,
   listDevices,
+  playMusicOnEsp32,
+  stopMusicOnEsp32,
   sendChat,
   sendLive2dState,
   sendTts
@@ -44,6 +48,25 @@ import {
 } from './services/astrbot'
 
 const active = new Map<string, AbortController>()
+const RELEASE_SONG_URL =
+  'https://www.bilibili.com/video/BV16XdHYGExU'
+
+function isAllowedMusicUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (
+      url.protocol === 'https:' &&
+      (url.hostname === 'www.bilibili.com' || url.hostname === 'bilibili.com') &&
+      url.pathname === '/video/BV16XdHYGExU'
+    )
+  } catch {
+    return false
+  }
+}
+
+function getMusicPlaybackTarget(): MusicPlaybackTarget {
+  return getSettings().music?.playbackTarget === 'esp32' ? 'esp32' : 'pc'
+}
 
 /** 丢弃渲染层补丁中的 apiKey / hasApiKey，避免把状态性/敏感字段写入主进程配置 */
 function normalizePatch(partial: SettingsPatch): Partial<AppSettings> {
@@ -216,6 +239,23 @@ export function registerIpc(): void {
   esp32Emitter.on('text', (m) => broadcast('esp32:text', m))
   esp32Emitter.on('voice-text', (m) => broadcast('esp32:voice-text', m))
   esp32Emitter.on('live2d-command', (c) => broadcast('esp32:live2d-command', c))
+  esp32Emitter.on('music-play', (command: Esp32MusicCommand) => {
+    if (!isAllowedMusicUrl(command.url)) {
+      console.warn('[esp32] ignored unsupported music URL:', command.url)
+      return
+    }
+    if (getMusicPlaybackTarget() === 'pc') {
+      void shell.openExternal(RELEASE_SONG_URL)
+      return
+    }
+    void playMusicOnEsp32(command.url).then((result) => {
+      if (!result.ok && result.message) broadcast('esp32:error', { message: result.message })
+    })
+  })
+  esp32Emitter.on('music-stop', () => {
+    const result = stopMusicOnEsp32()
+    if (!result.ok && result.message) broadcast('esp32:error', { message: result.message })
+  })
   esp32Emitter.on('error', (m) => broadcast('esp32:error', m))
   perfEmitter.on('sample', (s) => broadcast('perf:sample', s))
   astrbotEmitter.on('status', (s) => broadcast('astrbot:status', s))

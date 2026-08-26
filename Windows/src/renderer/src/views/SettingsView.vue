@@ -143,6 +143,10 @@ const themeOptions: Array<{ label: string; value: ThemeMode }> = [
   { label: '浅色', value: 'light' },
   { label: '深色', value: 'dark' }
 ]
+const musicPlaybackOptions = [
+  { label: '\u7535\u8111\u64ad\u653e', value: 'pc' },
+  { label: 'ESP32 \u672C\u5730\u64AD\u653E', value: 'esp32' }
+]
 
 const personaOptions = computed(() =>
   settings.personas.map((p) => ({ label: `${p.avatar} ${p.name}`, value: p.id }))
@@ -743,6 +747,20 @@ async function reset(): Promise<void> {
           <n-button size="small" type="primary" @click="onToggleAstrbot()">
             {{ astrbot.connected ? '断开' : '连接' }}
           </n-button>
+        </n-form>
+      </n-card>
+
+      <n-card title="音乐播放" size="small">
+        <n-form label-placement="top" :show-feedback="false">
+          <n-form-item label="播放设备">
+            <n-select
+              v-model:value="settings.music.playbackTarget"
+              :options="musicPlaybackOptions"
+            />
+          </n-form-item>
+          <n-alert type="info" size="small">
+            ESP32 模式会通过局域网传输音频，需要保持 ESP32 连接。
+          </n-alert>
         </n-form>
       </n-card>
 

@@ -27,6 +27,11 @@ static const char *TAG = "i2s_audio";
 static i2s_chan_handle_t s_tx = NULL; /* MAX98357A 功放 */
 static i2s_chan_handle_t s_rx = NULL; /* ICS-43434 麦克风 */
 
+/* I2S 读取互斥：JustFloat 轮询与语音录音并发读同一 RX 通道，需串行化 */
+static SemaphoreHandle_t s_rx_lock;
+/* 语音录音独占：置位后非语音任务读取立即超时返回 */
+static volatile bool s_rx_exclusive;
+
 /* SPKMODE 脚配置：拉高（默认增益档，MAX98357A 手册 GAIN_SLOT=VDD 时增益 9dB 且 L+R 混合） */
 static void spkmode_init(void)
 {
@@ -79,6 +84,7 @@ esp_err_t i2s_audio_init(void)
     i2s_std_slot_config_t slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
         I2S_DATA_BIT_WIDTH_24BIT, I2S_SLOT_MODE_STEREO);
     slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT; /* 保持 64 BCLK/帧 */
+    slot_cfg.ws_width = 32; /* Match the complete 32-bit half-frame. */
 
     /* 单份 GPIO 配置：BCLK=17, WS=8, DOUT=7（功放）, DIN=18（麦克风） */
     i2s_std_gpio_config_t gpio_cfg = {
@@ -120,21 +126,60 @@ esp_err_t i2s_audio_init(void)
         return err;
     }
 
+    s_rx_lock = xSemaphoreCreateMutex();
+    if (s_rx_lock == NULL) {
+        ESP_LOGE(TAG, "rx_lock create failed");
+        return ESP_ERR_NO_MEM;
+    }
+
     ESP_LOGI(TAG, "I2S audio ready: BCLK=%d WS=%d DIN(mic)=%d DOUT(amp)=%d @ %d Hz",
              I2S_AUDIO_BCLK, I2S_AUDIO_WS, I2S_AUDIO_DIN, I2S_AUDIO_DOUT,
              I2S_AUDIO_SAMPLE_RATE);
     return ESP_OK;
 }
 
+void i2s_audio_set_rx_exclusive(bool exclusive)
+{
+    s_rx_exclusive = exclusive;
+}
+
+/* 语音专用读取：返回本次 DMA 实际读取的完整帧数。 */
+esp_err_t i2s_audio_read_voice(int32_t *buf, size_t frames, size_t *frames_read)
+{
+    if (s_rx == NULL || buf == NULL || frames == 0 || frames_read == NULL)
+        return ESP_ERR_INVALID_STATE;
+    *frames_read = 0;
+    if (s_rx_lock && xSemaphoreTake(s_rx_lock, pdMS_TO_TICKS(20)) != pdTRUE)
+        return ESP_ERR_TIMEOUT;
+
+    /* frames 表示立体声帧；每帧包含左/右两个 32-bit slot。 */
+    const size_t bytes_wanted = frames * 2 * sizeof(int32_t);
+    size_t bytes_read = 0;
+    esp_err_t err = i2s_channel_read(s_rx, buf, bytes_wanted, &bytes_read,
+                                     pdMS_TO_TICKS(50));
+    if (s_rx_lock) xSemaphoreGive(s_rx_lock);
+    *frames_read = bytes_read / (2 * sizeof(int32_t));
+    if (err != ESP_OK && *frames_read == 0) return err;
+    return *frames_read > 0 ? ESP_OK : ESP_ERR_TIMEOUT;
+}
 esp_err_t i2s_audio_read(int32_t *buf, size_t frames)
 {
     if (s_rx == NULL || buf == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    /* 语音录音独占期间，非录音任务读取直接超时（不抢 DMA 数据） */
+    if (s_rx_exclusive) {
+        return ESP_ERR_TIMEOUT;
+    }
+    /* 串行化：JustFloat 轮询与语音录音并发读同一 RX 通道 */
+    if (s_rx_lock && xSemaphoreTake(s_rx_lock, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
     size_t bytes_read = 0;
     /* 非阻塞读取：DMA 有数据立即返回，无数据立即超时（不拖慢 JustFloat 轮询） */
     esp_err_t err = i2s_channel_read(s_rx, buf, frames * sizeof(int32_t), &bytes_read,
                                      pdMS_TO_TICKS(5));
+    if (s_rx_lock) xSemaphoreGive(s_rx_lock);
     if (err != ESP_OK) {
         return err; /* 不打印日志，避免污染串口 */
     }
@@ -156,6 +201,57 @@ esp_err_t i2s_audio_write(const int32_t *buf, size_t frames)
     if (bytes_written != frames * sizeof(int32_t)) {
         ESP_LOGW(TAG, "TX short write: %u/%u bytes", (unsigned)bytes_written,
                  (unsigned)(frames * sizeof(int32_t)));
+    }
+    return ESP_OK;
+}
+
+esp_err_t i2s_audio_set_tx_sample_rate(uint32_t sample_rate)
+{
+    if (s_tx == NULL || sample_rate < 8000 || sample_rate > 96000)
+        return ESP_ERR_INVALID_ARG;
+
+    esp_err_t err = i2s_channel_disable(s_tx);
+    if (err != ESP_OK) return err;
+
+    i2s_std_clk_config_t clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate);
+    clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_384;
+    err = i2s_channel_reconfig_std_clock(s_tx, &clk_cfg);
+    if (err != ESP_OK) return err;
+    return i2s_channel_enable(s_tx);
+}
+
+esp_err_t i2s_audio_write_pcm16(const int16_t *pcm, size_t samples, uint8_t channels)
+{
+    if (pcm == NULL || samples == 0 || (channels != 1 && channels != 2))
+        return ESP_ERR_INVALID_ARG;
+
+    static int32_t tx_buf[1024];
+    size_t offset = 0;
+    while (offset < samples)
+    {
+        size_t input_samples = samples - offset;
+        if (channels == 1)
+        {
+            size_t frames = input_samples > 512 ? 512 : input_samples;
+            for (size_t i = 0; i < frames; i++)
+            {
+                int32_t sample = ((int32_t)pcm[offset + i] / 4) << 8;
+                tx_buf[i * 2] = sample;
+                tx_buf[i * 2 + 1] = sample;
+            }
+            esp_err_t err = i2s_audio_write(tx_buf, frames * 2);
+            if (err != ESP_OK) return err;
+            offset += frames;
+        }
+        else
+        {
+            size_t write_samples = input_samples > 1024 ? 1024 : input_samples;
+            for (size_t i = 0; i < write_samples; i++)
+                tx_buf[i] = ((int32_t)pcm[offset + i] / 4) << 8;
+            esp_err_t err = i2s_audio_write(tx_buf, write_samples);
+            if (err != ESP_OK) return err;
+            offset += write_samples;
+        }
     }
     return ESP_OK;
 }

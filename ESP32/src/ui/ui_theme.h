@@ -37,6 +37,8 @@ extern "C" {
 /* 定制中文字体子集：覆盖全部 UI 文案（102 字 + 标点 + ASCII） */
 LV_FONT_DECLARE(lv_font_source_han_sans_sc_16_cjk);
 LV_FONT_DECLARE(lv_font_ui_16);
+/* 全量 GB2312 一级字库（3755 常用字 + 标点 + ASCII），用于 AI 动态内容 */
+LV_FONT_DECLARE(lv_font_ui_16_full);
 #define UI_FONT_DEFAULT ui_theme_font()
 LV_FONT_DECLARE(lv_font_montserrat_14);
 #define UI_FONT_SMALL &lv_font_montserrat_14

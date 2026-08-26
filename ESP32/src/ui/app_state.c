@@ -184,6 +184,45 @@ void app_state_publish_live2d_message(const char *message_preview)
     portEXIT_CRITICAL(&s_lock);
 }
 
+/* ------------------------------------------------------------------ */
+/* 会话状态（语音互动状态机）                                         */
+/* ------------------------------------------------------------------ */
+
+void app_state_publish_session(app_session_mode_t mode, app_session_state_t state,
+                               const char *error)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_state.session.mode = mode;
+    s_state.session.state = state;
+    if (error)
+    {
+        truncate_utf8(s_state.session.error, sizeof(s_state.session.error),
+                      error, sizeof(s_state.session.error) - 1);
+    }
+    s_state.session.updated_ms = now_ms();
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void app_state_publish_session_focus(int focus)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_state.session.focus = focus;
+    s_state.session.updated_ms = now_ms();
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void app_state_publish_session_error(const char *error)
+{
+    portENTER_CRITICAL(&s_lock);
+    if (error)
+    {
+        truncate_utf8(s_state.session.error, sizeof(s_state.session.error),
+                      error, sizeof(s_state.session.error) - 1);
+    }
+    s_state.session.updated_ms = now_ms();
+    portEXIT_CRITICAL(&s_lock);
+}
+
 const app_state_t *app_state_get(void)
 {
     return &s_state;

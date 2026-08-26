@@ -21,12 +21,6 @@ function extractDeltaText(delta: unknown): string {
   return pick(d.content) || pick(d.reasoning_content) || ''
 }
 
-function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '')
-  if (/\/chat\/completions$/i.test(trimmed)) return trimmed
-  return `${trimmed}/chat/completions`
-}
-
 /**
  * 向 OpenAI 兼容端点发起流式对话请求。
  * 逐 token 通过 onChunk 回调推送，最终返回完整文本。
@@ -175,7 +169,7 @@ export async function classifyEmotions(
     lines
   ].join('\n')
 
-  const url = normalizeBaseUrl(baseUrl)
+  const url = resolveEndpoint(baseUrl, 'chat')
   const res = await fetch(url, {
     method: 'POST',
     headers: {

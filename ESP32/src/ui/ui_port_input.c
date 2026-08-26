@@ -13,6 +13,7 @@
 
 #include "board_keys.h"
 #include "touch.h"
+#include "ui_pages.h"
 
 static const char *TAG = "ui_port_in";
 
@@ -98,15 +99,11 @@ static void ui_port_input_task(void *arg)
             }
         }
 
-        /* 实体键扫描 → LVGL KEYPAD */
+        /* 实体键扫描 → 交给页面层路由（含长按） */
         board_key_event_t key = board_keys_scan();
-        if (key == BOARD_KEY_BACK)
+        if (key != BOARD_KEY_NONE)
         {
-            s_key_pending = LV_KEY_ESC;
-        }
-        else if (key == BOARD_KEY_OK)
-        {
-            s_key_pending = LV_KEY_ENTER;
+            ui_pages_handle_key(key);
         }
 
         vTaskDelay(1);

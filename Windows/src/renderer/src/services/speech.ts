@@ -50,6 +50,62 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
+function writeWavPcm16(samples: Float32Array, sampleRate: number): ArrayBuffer {
+  const dataSize = samples.length * 2
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+  const writeText = (offset: number, text: string): void => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
+  }
+  writeText(0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeText(8, 'WAVE')
+  writeText(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  writeText(36, 'data')
+  view.setUint32(40, dataSize, true)
+  for (let i = 0; i < samples.length; i++) {
+    const sample = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(44 + i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+  }
+  return buffer
+}
+
+function resampleMono(audio: AudioBuffer, targetRate: number): Float32Array {
+  const source = audio.getChannelData(0)
+  if (audio.sampleRate === targetRate) return new Float32Array(source)
+  const targetLength = Math.max(1, Math.round(source.length * targetRate / audio.sampleRate))
+  const output = new Float32Array(targetLength)
+  const ratio = audio.sampleRate / targetRate
+  for (let i = 0; i < targetLength; i++) {
+    const position = i * ratio
+    const left = Math.floor(position)
+    const right = Math.min(left + 1, source.length - 1)
+    const weight = position - left
+    output[i] = source[left] * (1 - weight) + source[right] * weight
+  }
+  return output
+}
+
+async function recordingBlobToWav(blob: Blob): Promise<{ base64: string; mimeType: string }> {
+  const AudioContextCtor = window.AudioContext
+  if (!AudioContextCtor) return { base64: await blobToBase64(blob), mimeType: blob.type || 'audio/webm' }
+  const context = new AudioContextCtor()
+  try {
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer())
+    const samples = resampleMono(decoded, 16000)
+    const wav = new Blob([writeWavPcm16(samples, 16000)], { type: 'audio/wav' })
+    return { base64: await blobToBase64(wav), mimeType: 'audio/wav' }
+  } finally {
+    await context.close().catch(() => undefined)
+  }
+}
 export interface Recording {
   stop: () => Promise<{ base64: string; mimeType: string }>
 }
@@ -73,10 +129,7 @@ export async function startRecording(): Promise<Recording> {
         rec.onstop = () => {
           stream.getTracks().forEach((t) => t.stop())
           const blob = new Blob(chunks, { type: mimeType || 'audio/webm' })
-          void blobToBase64(blob).then(
-            (base64) => resolve({ base64, mimeType: mimeType || 'audio/webm' }),
-            reject
-          )
+          void recordingBlobToWav(blob).then(resolve, reject)
         }
         rec.onerror = () => reject(new Error('录音失败'))
         rec.stop()

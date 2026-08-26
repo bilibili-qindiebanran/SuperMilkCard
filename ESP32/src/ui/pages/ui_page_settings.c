@@ -4,6 +4,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "lvgl.h"
 
@@ -37,11 +38,12 @@ static void setting_row(lv_obj_t *card, const char *title, const char *value,
     ui_theme_apply_status_text(value_label, status);
 }
 
-/* 网络状态：Wi-Fi/TCP + 配网按钮回调 */
+/* 网络状态：Wi-Fi/TCP + 配网按钮 + 局域网 IP/配置网页 */
 static lv_obj_t *s_net_wifi_value;
 static lv_obj_t *s_net_tcp_value;
-static lv_obj_t *s_net_prov_hint;
 static lv_obj_t *s_net_prov_btn;
+static lv_obj_t *s_net_lan_ip;
+static lv_obj_t *s_net_portal;
 static lv_obj_t *s_net_page;
 
 static void net_provision_click_cb(lv_event_t *event)
@@ -60,11 +62,6 @@ void ui_page_settings_refresh(void)
     {
         lv_label_set_text(s_net_wifi_value, UI_STR_SETTINGS_NET_PROVISIONING);
         ui_theme_apply_status_text(s_net_wifi_value, 2);
-        if (s_net_prov_hint)
-        {
-            lv_label_set_text(s_net_prov_hint, UI_STR_SETTINGS_NET_AP_HINT);
-            lv_obj_set_style_text_color(s_net_prov_hint, UI_COLOR_WARN, 0);
-        }
         if (s_net_prov_btn) lv_obj_add_flag(s_net_prov_btn, LV_OBJ_FLAG_HIDDEN);
     }
     else
@@ -73,17 +70,39 @@ void ui_page_settings_refresh(void)
                           state->conn.wifi == APP_CONN_OK ? UI_STR_STATE_OK : UI_STR_STATE_DISC);
         ui_theme_apply_status_text(s_net_wifi_value,
                                    state->conn.wifi == APP_CONN_OK ? 1 : 0);
-        if (s_net_prov_hint)
-        {
-            lv_label_set_text(s_net_prov_hint, UI_STR_SETTINGS_NET_AP_NAME);
-            lv_obj_set_style_text_color(s_net_prov_hint, UI_COLOR_TEXT_DIM, 0);
-        }
         if (s_net_prov_btn) lv_obj_clear_flag(s_net_prov_btn, LV_OBJ_FLAG_HIDDEN);
     }
 
     lv_label_set_text(s_net_tcp_value,
                       state->live2d.connected ? UI_STR_STATE_OK : UI_STR_STATE_DISC);
     ui_theme_apply_status_text(s_net_tcp_value, state->live2d.connected ? 1 : 0);
+
+    /* 局域网地址与配置网页 URL：仅在内容变化时刷新，避免 LVGL 高频重绘 */
+    static char s_last_ip[48] = "";
+    char ip[16] = "";
+    bool has_ip = net_wifi_get_sta_ip(ip, sizeof(ip));
+    if (!has_ip)
+    {
+        if (strcmp(s_last_ip, UI_STR_SETTINGS_NET_LAN_DISC) != 0)
+        {
+            lv_label_set_text(s_net_lan_ip, UI_STR_SETTINGS_NET_LAN_DISC);
+            ui_theme_apply_status_text(s_net_lan_ip, 0);
+            lv_label_set_text(s_net_portal, UI_STR_SETTINGS_NET_PORTAL_AP);
+            snprintf(s_last_ip, sizeof(s_last_ip), "%s", UI_STR_SETTINGS_NET_LAN_DISC);
+        }
+    }
+    else
+    {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "http://%s/", ip);
+        if (strcmp(s_last_ip, ip) != 0)
+        {
+            lv_label_set_text(s_net_lan_ip, ip);
+            ui_theme_apply_status_text(s_net_lan_ip, 1);
+            lv_label_set_text(s_net_portal, buf);
+            snprintf(s_last_ip, sizeof(s_last_ip), "%s", ip);
+        }
+    }
 }
 
 lv_obj_t *ui_page_settings_create(lv_obj_t *parent)
@@ -154,7 +173,7 @@ lv_obj_t *ui_page_settings_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(tip, UI_COLOR_TEXT_DIM, 0);
 
     /* 网络与配网卡片（整行） */
-    lv_obj_t *net_card = card_create(page, UI_MARGIN, 236, 460, 42);
+    lv_obj_t *net_card = card_create(page, UI_MARGIN, 236, 460, 92);
     lv_obj_t *net_title = lv_label_create(net_card);
     lv_label_set_text(net_title, UI_STR_SETTINGS_NET);
     lv_obj_set_pos(net_title, UI_GAP, 6);
@@ -171,12 +190,30 @@ lv_obj_t *ui_page_settings_create(lv_obj_t *parent)
     lv_obj_set_pos(s_net_tcp_value, 178, 6);
     ui_theme_apply_status_text(s_net_tcp_value, 0);
 
-    s_net_prov_hint = lv_label_create(net_card);
-    lv_label_set_text(s_net_prov_hint, UI_STR_SETTINGS_NET_AP_NAME);
-    lv_obj_set_pos(s_net_prov_hint, UI_GAP, 24);
-    lv_obj_set_width(s_net_prov_hint, 260);
-    lv_label_set_long_mode(s_net_prov_hint, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_color(s_net_prov_hint, UI_COLOR_TEXT_DIM, 0);
+    /* 局域网地址 + 配置网页（只读信息行，由 refresh 更新） */
+    lv_obj_t *lan_title = lv_label_create(net_card);
+    lv_label_set_text(lan_title, UI_STR_SETTINGS_NET_LAN_IP);
+    lv_obj_set_pos(lan_title, UI_GAP, 34);
+    lv_obj_set_style_text_color(lan_title, UI_COLOR_TEXT_DIM, 0);
+
+    s_net_lan_ip = lv_label_create(net_card);
+    lv_label_set_text(s_net_lan_ip, UI_STR_SETTINGS_NET_LAN_DISC);
+    lv_obj_set_pos(s_net_lan_ip, 110, 34);
+    lv_obj_set_width(s_net_lan_ip, 220);
+    lv_label_set_long_mode(s_net_lan_ip, LV_LABEL_LONG_DOT);
+    ui_theme_apply_status_text(s_net_lan_ip, 0);
+
+    lv_obj_t *portal_title = lv_label_create(net_card);
+    lv_label_set_text(portal_title, UI_STR_SETTINGS_NET_PORTAL);
+    lv_obj_set_pos(portal_title, UI_GAP, 62);
+    lv_obj_set_style_text_color(portal_title, UI_COLOR_TEXT_DIM, 0);
+
+    s_net_portal = lv_label_create(net_card);
+    lv_label_set_text(s_net_portal, UI_STR_SETTINGS_NET_PORTAL_AP);
+    lv_obj_set_pos(s_net_portal, 110, 62);
+    lv_obj_set_width(s_net_portal, 220);
+    lv_label_set_long_mode(s_net_portal, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_color(s_net_portal, UI_COLOR_TEXT_DIM, 0);
 
     s_net_prov_btn = lv_button_create(net_card);
     lv_obj_set_size(s_net_prov_btn, 100, 26);

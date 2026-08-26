@@ -19,17 +19,16 @@ static lv_obj_t *s_clock_value;
 static lv_obj_t *s_clock_status;
 static lv_obj_t *s_power_value;
 static lv_obj_t *s_power_detail;
-static lv_obj_t *s_audio_value;
-static lv_obj_t *s_audio_bar;
 static lv_obj_t *s_conn_value;
 static lv_obj_t *s_conn_detail;
 static lv_obj_t *s_home_page;
 static lv_obj_t *s_fps_label;
-static int s_last_audio_bar_value = -1;
 static uint32_t s_last_fps = UINT32_MAX;
 static int s_clock_status_code = -1;
 static int s_power_status_code = -1;
 static int s_conn_status_code = -1;
+static int s_last_clock_hour = -1;
+static int s_last_clock_min = -1;
 
 static void label_set_text_if_changed(lv_obj_t *label, const char *text)
 {
@@ -96,9 +95,15 @@ void ui_page_home_refresh(void)
     const app_state_t *state = app_state_get();
     char text[48] = {0};
 
-    if (state->clock.synced)
+    if (state->clock.hour != s_last_clock_hour || state->clock.min != s_last_clock_min)
     {
         snprintf(text, sizeof(text), "%02u:%02u", state->clock.hour, state->clock.min);
+        label_set_text_if_changed(s_clock_value, text);
+        s_last_clock_hour = state->clock.hour;
+        s_last_clock_min = state->clock.min;
+    }
+    if (state->clock.synced)
+    {
         label_set_text_if_changed(s_clock_status, UI_STR_TIME_SYNCED);
         if (s_clock_status_code != 1)
         {
@@ -115,7 +120,6 @@ void ui_page_home_refresh(void)
             s_clock_status_code = 2;
         }
     }
-    label_set_text_if_changed(s_clock_value, text[0] ? text : UI_STR_TIME_PLACE);
 
     if (state->power.charging) label_set_text_if_changed(s_power_value, UI_STR_POWER_CHG);
     else if (state->power.charge_full) label_set_text_if_changed(s_power_value, UI_STR_POWER_FULL);
@@ -126,17 +130,6 @@ void ui_page_home_refresh(void)
     {
         ui_theme_apply_status_text(s_power_value, power_status);
         s_power_status_code = power_status;
-    }
-
-    snprintf(text, sizeof(text), "%+.1f dB", (double)state->audio.rms_db);
-    label_set_text_if_changed(s_audio_value, text);
-    int bar_value = (int)((state->audio.rms_db + 60.0f) * 100.0f / 60.0f);
-    if (bar_value < 0) bar_value = 0;
-    if (bar_value > 100) bar_value = 100;
-    if (bar_value != s_last_audio_bar_value)
-    {
-        lv_bar_set_value(s_audio_bar, bar_value, LV_ANIM_OFF);
-        s_last_audio_bar_value = bar_value;
     }
 
     update_connection_state(state);
@@ -196,24 +189,12 @@ lv_obj_t *ui_page_home_create(lv_obj_t *parent)
     s_clock_status = label_create(clock_card, UI_STR_TIME_WAIT, UI_GAP, 95, UI_COLOR_WARN);
     label_create(clock_card, UI_STR_TIME_HINT, UI_GAP, 105, UI_COLOR_TEXT_DIM);
 
-    lv_obj_t *power_card = card_create(s_home_page, 229, 50, 241, 60, true);
+    lv_obj_t *power_card = card_create(s_home_page, 229, 50, 241, 126, true);
     label_create(power_card, UI_STR_POWER_TITLE, UI_GAP, 10, UI_COLOR_TEXT_DIM);
     s_power_value = label_create(power_card, UI_STR_POWER_IDLE, 95, 10, UI_COLOR_TEXT);
     s_power_detail = label_create(power_card, UI_STR_POWER_STABLE, UI_GAP, 36, UI_COLOR_TEXT_DIM);
     lv_obj_set_width(s_power_detail, 205);
     lv_label_set_long_mode(s_power_detail, LV_LABEL_LONG_DOT);
-
-    lv_obj_t *audio_card = card_create(s_home_page, 229, 116, 241, 60, true);
-    label_create(audio_card, UI_STR_AUDIO_TITLE, UI_GAP, 10, UI_COLOR_TEXT_DIM);
-    s_audio_value = label_create(audio_card, "-- dB", 95, 10, UI_COLOR_TEXT);
-    s_audio_bar = lv_bar_create(audio_card);
-    lv_obj_set_size(s_audio_bar, 195, 8);
-    lv_obj_set_pos(s_audio_bar, UI_GAP, 38);
-    lv_obj_set_style_bg_color(s_audio_bar, UI_COLOR_PRIMARY_SOFT, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_audio_bar, UI_COLOR_PRIMARY, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(s_audio_bar, 4, LV_PART_MAIN);
-    lv_obj_set_style_radius(s_audio_bar, 4, LV_PART_INDICATOR);
-    lv_bar_set_range(s_audio_bar, 0, 100);
 
     lv_obj_t *conn_card = card_create(s_home_page, UI_MARGIN, 184, 292, 56, true);
     label_create(conn_card, UI_STR_CONN_TITLE, UI_GAP, 9, UI_COLOR_TEXT_DIM);

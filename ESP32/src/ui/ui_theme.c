@@ -17,8 +17,10 @@ const lv_font_t *ui_theme_font(void)
 {
     if (!s_font_ready)
     {
-        s_ui_font = lv_font_source_han_sans_sc_16_cjk;
-        s_ui_font.fallback = &lv_font_ui_16;
+        /* 主字体用全量 GB2312 字库（覆盖 AI 动态内容），
+         * fallback 保留内置 CJK 子集 + 定制 UI 字集兜底 */
+        s_ui_font = lv_font_ui_16_full;
+        s_ui_font.fallback = &lv_font_source_han_sans_sc_16_cjk;
         s_font_ready = true;
     }
     return &s_ui_font;
